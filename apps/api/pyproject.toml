@@ -3,6 +3,7 @@ name = "yardlens-api"
 version = "0.1.0"
 description = "YardLens API: camera-based yard monitoring with YOLO detection, tracking and counting"
 readme = "README.md"
+license = "AGPL-3.0-only"
 authors = [
     { name = "Uchkun Rakhimov", email = "uchkunrakhimov@gmail.com" }
 ]

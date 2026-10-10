@@ -211,3 +211,10 @@ MVP, introduce a migration tool (e.g. Alembic). Tests use SQLite in a temporary 
   JavaScript runtime (Deno/Node/Bun) for YouTube.
 - No authentication: run it on a trusted network or behind a reverse proxy with auth.
 - No database migrations yet (see above).
+
+## License
+
+YardLens is licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0-only),
+matching its Ultralytics YOLO dependency. If you run a modified version as a network service, you
+must offer its source code to the service's users. For closed-source commercial use, obtain an
+Ultralytics Enterprise License or replace the detector with a permissively licensed model.
