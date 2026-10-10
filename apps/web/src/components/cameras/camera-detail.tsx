@@ -21,11 +21,11 @@ import { classLabel, SOURCE_TYPE_LABELS, sortedCounts } from "@/lib/format";
 function Stat({ label, value, icon }: { label: string; value: ReactNode; icon: ReactNode }) {
   return (
     <div className="bg-card flex items-center gap-3 rounded-xl border p-4">
-      <div className="bg-muted text-muted-foreground flex size-9 items-center justify-center rounded-lg [&_svg]:size-4">
+      <div className="bg-muted text-muted-foreground flex size-9 shrink-0 items-center justify-center rounded-lg [&_svg]:size-4">
         {icon}
       </div>
       <div className="min-w-0">
-        <div className="text-muted-foreground text-xs">{label}</div>
+        <div className="text-muted-foreground truncate text-xs">{label}</div>
         <div className="truncate text-lg font-semibold tabular-nums">{value}</div>
       </div>
     </div>
@@ -50,7 +50,7 @@ function CameraStats({ camera }: { camera: Camera }) {
       />
       <Stat
         label="Inference rate"
-        value={`${runtime.measured_fps.toFixed(1)} / ${camera.inference_fps} fps`}
+        value={`${runtime.measured_fps.toFixed(1)} fps`}
         icon={<Gauge aria-hidden />}
       />
     </div>
