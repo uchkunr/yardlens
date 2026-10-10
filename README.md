@@ -4,6 +4,12 @@ Camera-based yard monitoring. YardLens connects to video streams, runs YOLO obje
 ByteTrack tracking, counts objects crossing a line, and shows live annotated feeds and events in a
 web dashboard.
 
+![YardLens demo: live annotated cameras, line counting and real-time events](docs/yardlens-demo.gif)
+
+Full-quality video: [docs/yardlens-demo.mp4](docs/yardlens-demo.mp4).
+
+## Screenshots
+
 ![Overview: live annotated camera tiles and the real-time event feed](docs/screenshots/overview.webp)
 
 ![Camera detail: live feed with tracked objects and the counting line, counters and recent events](docs/screenshots/camera-detail.webp)
