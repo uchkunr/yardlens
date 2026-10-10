@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+.old_modules-*/
+
+# Nx
+.nx/cache
+.nx/workspace-data
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+
+# Runtime data (database, snapshots, downloaded models and videos)
+apps/api/data/
+
+# Env files
+.env
+.env.*
+!.env.example
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/

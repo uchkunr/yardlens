@@ -1,0 +1,105 @@
+{
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "name": "api",
+  "projectType": "application",
+  "sourceRoot": "apps/api/src",
+  "targets": {
+    "install": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "apps/api",
+        "command": "uv sync"
+      }
+    },
+    "db-setup": {
+      "executor": "nx:run-commands",
+      "dependsOn": [
+        "install"
+      ],
+      "options": {
+        "cwd": "apps/api",
+        "command": "./scripts/db-setup.sh"
+      }
+    },
+    "seed": {
+      "executor": "nx:run-commands",
+      "dependsOn": [
+        "db-setup"
+      ],
+      "options": {
+        "cwd": "apps/api",
+        "command": "uv run seed"
+      }
+    },
+    "dev": {
+      "executor": "nx:run-commands",
+      "continuous": true,
+      "options": {
+        "cwd": "apps/api",
+        "command": "uv run uvicorn yardlens_api.main:create_app --factory --reload --reload-dir src --host 127.0.0.1 --port 8000"
+      }
+    },
+    "start": {
+      "executor": "nx:run-commands",
+      "continuous": true,
+      "options": {
+        "cwd": "apps/api",
+        "command": "uv run yardlens-api"
+      }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": [
+        "{projectRoot}/src/**/*.py",
+        "{projectRoot}/tests/**/*.py",
+        "{projectRoot}/pyproject.toml"
+      ],
+      "options": {
+        "cwd": "apps/api",
+        "commands": [
+          "uv run ruff check .",
+          "uv run ruff format --check ."
+        ],
+        "parallel": false
+      }
+    },
+    "format": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "apps/api",
+        "commands": [
+          "uv run ruff check --fix .",
+          "uv run ruff format ."
+        ],
+        "parallel": false
+      }
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": [
+        "{projectRoot}/src/**/*.py",
+        "{projectRoot}/tests/**/*.py",
+        "{projectRoot}/pyproject.toml"
+      ],
+      "options": {
+        "cwd": "apps/api",
+        "command": "uv run pyright"
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "inputs": [
+        "{projectRoot}/src/**/*.py",
+        "{projectRoot}/tests/**/*.py",
+        "{projectRoot}/pyproject.toml"
+      ],
+      "options": {
+        "cwd": "apps/api",
+        "command": "uv run pytest"
+      }
+    }
+  }
+}

@@ -1,0 +1,85 @@
+[project]
+name = "yardlens-api"
+version = "0.1.0"
+description = "YardLens API: camera-based yard monitoring with YOLO detection, tracking and counting"
+readme = "README.md"
+authors = [
+    { name = "Uchkun Rakhimov", email = "uchkunrakhimov@gmail.com" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "asyncpg>=0.32.0",
+    "fastapi>=0.143.0",
+    "httpx>=0.28.1",
+    "opencv-python-headless>=5.0.0.93",
+    "pydantic>=2.14.0",
+    "pydantic-settings>=2.15.0",
+    "sqlalchemy[asyncio]>=2.1.4",
+    "sse-starlette>=3.5.0",
+    "supervision>=0.30.9",
+    "trackers>=2.6.1",
+    "ultralytics>=8.4.174",
+    "uvicorn[standard]>=0.54.0",
+    "yt-dlp[default]>=2026.8.19",
+]
+
+[project.scripts]
+yardlens-api = "yardlens_api.main:main"
+seed = "yardlens_api.seed:main"
+
+[build-system]
+requires = ["uv_build>=0.12.23,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv]
+# Ultralytics depends on the GUI build of OpenCV; the API only needs the headless build.
+# Both ship the same `cv2` module, so the GUI wheel is excluded to avoid conflicts.
+override-dependencies = ["opencv-python ; sys_platform == 'never'"]
+
+[dependency-groups]
+dev = [
+    "aiosqlite>=0.22.1",
+    "pyright>=1.1.414",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.16.10",
+]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W", "F", "I", "N", "UP", "B", "A", "C4", "SIM", "RET", "PT", "PTH", "ASYNC", "S", "RUF",
+    "TID", "TC", "PERF", "FURB", "LOG", "G",
+]
+ignore = [
+    "S101", # assert is fine in tests and for narrowing
+    "S104", # binding is configured explicitly
+    "TC001", "TC002", "TC003", # runtime imports are needed by FastAPI/Pydantic annotations
+    "G004",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S", "PLR2004"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["yardlens_api", "tests"]
+
+[tool.pyright]
+pythonVersion = "3.14"
+typeCheckingMode = "strict"
+include = ["src", "tests"]
+venvPath = "."
+venv = ".venv"
+# Ultralytics and yt-dlp ship without type information.
+reportMissingTypeStubs = "none"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+asyncio_default_test_loop_scope = "function"
+filterwarnings = ["ignore::DeprecationWarning:supervision.*"]
