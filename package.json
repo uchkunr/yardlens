@@ -9,6 +9,8 @@
     "setup": "nx run api:seed",
     "dev": "nx run-many -t dev",
     "build": "nx run-many -t build",
+    "start": "nx run-many -t start",
+    "bench": "nx run api:bench",
     "lint": "nx run-many -t lint",
     "typecheck": "nx run-many -t typecheck",
     "test": "nx run-many -t test",

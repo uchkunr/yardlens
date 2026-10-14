@@ -5,8 +5,12 @@ detections. The camera worker feeds it one ``sv.Detections`` per inference tick 
 asks it to draw the latest tracks onto every displayed frame (``render``). Display frames arrive
 far more often than inference results, so ``render`` extrapolates each box from its recent motion
 instead of leaving it where the object was at the last inference.
+
+Each ``Observation`` also says whether anything is ``moving``, which sets how often the camera
+runs inference next (see ``pacing``).
 """
 
+import math
 from collections import Counter
 from dataclasses import dataclass, field, replace
 
@@ -27,6 +31,11 @@ _VELOCITY_SMOOTHING = 0.7
 # Motion measured across a longer gap (e.g. a track lost and found again) is not trusted.
 _MAX_VELOCITY_GAP_SECONDS = 2.0
 _STILL: Box = (0.0, 0.0, 0.0, 0.0)
+# ByteTrack starts a track only from detections at least this confident.
+_TRACK_ACTIVATION_THRESHOLD = 0.4
+# A box centre moving faster than this share of the frame diagonal per second is in motion;
+# detection jitter on a parked vehicle stays well below it.
+_MOVING_SPEED = 0.04
 _ZONE_COLOR = (255, 200, 0)  # BGR: light blue, distinct from the yellow counting line
 
 
@@ -46,6 +55,8 @@ class Observation:
     crossed_in: list[TrackedObject] = field(default_factory=list[TrackedObject])
     crossed_out: list[TrackedObject] = field(default_factory=list[TrackedObject])
     visible: dict[str, int] = field(default_factory=dict[str, int])
+    moving: bool = False
+    """Something moves, appears or crosses the line."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,7 +120,7 @@ class FrameAnalyzer:
         self._tracker = ByteTrackTracker(
             lost_track_buffer=max(int(fps * 3), 5),
             frame_rate=fps,
-            track_activation_threshold=0.4,
+            track_activation_threshold=_TRACK_ACTIVATION_THRESHOLD,
             high_conf_det_threshold=0.5,
             minimum_consecutive_frames=2,
             minimum_iou_threshold=0.1,
@@ -153,7 +164,8 @@ class FrameAnalyzer:
         """Track and count one inference frame captured at ``timestamp`` (monotonic seconds)."""
         height, width = frame.shape[:2]
         self._frame_index += 1
-        tracked = _confirmed(self._tracker.update(detections))
+        updated = self._tracker.update(detections)
+        tracked = _confirmed(updated)
         objects = _to_objects(tracked)
 
         observation = Observation(
@@ -180,7 +192,26 @@ class FrameAnalyzer:
             observation.crossed_out = [
                 obj for obj, hit in zip(objects, crossed_out, strict=True) if hit
             ]
+        observation.moving = bool(
+            observation.entered
+            or observation.crossed_in
+            or observation.crossed_out
+            or _pending(updated)
+            or self._any_moving(objects, width, height)
+        )
         return observation
+
+    def _any_moving(self, objects: list[TrackedObject], width: int, height: int) -> bool:
+        threshold = _MOVING_SPEED * math.hypot(width, height)
+        for obj in objects:
+            motion = self._motion.get(obj.tracker_id)
+            if motion is None:
+                continue
+            vx = (motion.velocity[0] + motion.velocity[2]) / 2
+            vy = (motion.velocity[1] + motion.velocity[3]) / 2
+            if math.hypot(vx, vy) > threshold:
+                return True
+        return False
 
     def predicted(self, timestamp: float) -> list[TrackedObject]:
         """Latest tracks with boxes moved to where they are expected at ``timestamp``."""
@@ -293,6 +324,16 @@ def _confirmed(detections: sv.Detections) -> sv.Detections:
     confirmed = detections[detections.tracker_id >= 0]
     assert isinstance(confirmed, sv.Detections)
     return confirmed
+
+
+def _pending(detections: sv.Detections) -> bool:
+    """Confident detections that are not (yet) a confirmed track: something new in view."""
+    if len(detections) == 0 or detections.tracker_id is None:
+        return False
+    unconfirmed = detections.tracker_id < 0
+    if detections.confidence is not None:
+        unconfirmed &= detections.confidence >= _TRACK_ACTIVATION_THRESHOLD
+    return bool(np.any(unconfirmed))
 
 
 def _to_objects(detections: sv.Detections) -> list[TrackedObject]:

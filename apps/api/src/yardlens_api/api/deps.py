@@ -13,6 +13,7 @@ from yardlens_api.services.detector import Detector
 from yardlens_api.services.event_bus import EventBus
 from yardlens_api.services.event_recorder import EventRecorder
 from yardlens_api.services.notifier import TelegramNotifier
+from yardlens_api.services.resources import ResourceMonitor
 from yardlens_api.services.settings_store import SettingsStore
 
 
@@ -30,6 +31,7 @@ class Container:
     recorder: EventRecorder
     notifier: TelegramNotifier
     http_client: httpx.AsyncClient
+    monitor: ResourceMonitor
     started_at: datetime
 
 

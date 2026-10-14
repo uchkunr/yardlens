@@ -1,4 +1,4 @@
-import type { CameraStatus, EventType, SourceType } from "@/lib/api/client";
+import type { Activity, CameraStatus, EventType, LoadLevel, SourceType } from "@/lib/api/client";
 
 /**
  * Russian UI copy, the default language. `en.ts` must have the same shape (it is typed against
@@ -252,6 +252,11 @@ export const ru = {
     recentDescription: "По этой камере, сначала новые",
     noEventsTitle: "Событий пока нет",
     noEventsDescription: "События этой камеры будут появляться здесь в реальном времени.",
+    modes: {
+      active: "в кадре движение",
+      standby: "машина стоит",
+      idle: "тихо, экономим",
+    } satisfies Record<Activity, string>,
     loadingNow: "Погрузка сейчас",
     loadingIdle: "Площадка свободна — ждём машину.",
     loadedLabel: "Погружено",
@@ -318,6 +323,7 @@ export const ru = {
       cameras: "Камеры",
       detection: "Распознавание",
       integrations: "Интеграции",
+      load: "Нагрузка",
       system: "Система",
     },
   },
@@ -369,7 +375,12 @@ export const ru = {
     url: "Адрес",
     filePath: "Путь к файлу",
     fps: "Частота анализа, кадр/с",
-    fpsHint: "Для подсчёта мешков на конвейере ставьте 8–15.",
+    fpsHint: "Для подсчёта мешков на конвейере ставьте 8–15. Когда в кадре тихо, камера сама анализирует реже.",
+    plateUrl: "Основной поток для номеров",
+    plateUrlPlaceholder: "rtsp://…/Streaming/Channels/101",
+    plateUrlInvalid: "Адрес должен начинаться с rtsp:// или rtsps://",
+    plateUrlHint:
+      "Необязательно. Если у камеры два потока, выше укажите дополнительный (лёгкий), а здесь основной: он откроется только на время чтения номера.",
     enabled: "Включена",
     test: "Проверить подключение",
     testing: "Проверяем подключение…",
@@ -476,6 +487,66 @@ export const ru = {
     apiUrl: "Адрес API",
   },
 
+  load: {
+    title: "Нагрузка на сервер",
+    description: "Обновляется каждые две секунды.",
+    cpu: "Процессор",
+    cores: (physical: string, logical: string) => `Ядер: ${physical}, потоков: ${logical}`,
+    yardlensShare: (value: string) => `YardLens: ${value}`,
+    memory: "Память",
+    memoryUsed: (used: string, total: string) => `${used} из ${total}`,
+    gpu: "Видеокарта",
+    videoMemory: (used: string, total: string) => `Видеопамять: ${used} из ${total}`,
+    history: "Последние три минуты",
+    total: "Всего",
+    levels: {
+      normal: "Нагрузка в норме",
+      busy: "Нагрузка повышена",
+      high: "Высокая нагрузка",
+      overload: "Перегрузка",
+    } satisfies Record<LoadLevel, string>,
+    levelHints: {
+      normal: "Камеры работают без ограничений.",
+      busy: (fps: string) => `Живое видео ограничено до ${fps}, подсчёт работает в полную силу.`,
+      high: (fps: string, share: string) => `Живое видео — ${fps}, анализ замедлен до ${share} от обычного.`,
+      overload: (fps: string, share: string) =>
+        `Сервер не справляется: живое видео — ${fps}, анализ — ${share} от обычного. Снизьте частоту анализа камер или выберите модель полегче.`,
+    },
+    inference: "Распознавание",
+    inferenceOn: (backend: string, device: string) => `${backend} · ${device}`,
+    threads: (value: string) => `потоков: ${value}`,
+    busy: (value: string) => `Занято ${value} времени`,
+    optimizing: "Готовим ускоренную версию модели. Пока работает обычная.",
+    devices: {
+      cpu: "процессор",
+      gpu: "видеокарта NVIDIA",
+      mps: "Apple GPU",
+      igpu: "встроенная графика Intel",
+    },
+    camerasTitle: "Камеры",
+    camerasDescription:
+      "Частота анализа меняется сама: полная, когда в кадре движение, и низкая, когда всё спокойно.",
+    camera: "Камера",
+    mode: "Сейчас",
+    rate: "Анализ",
+    decoding: "Видео декодирует",
+    rateValue: (current: string, max: string) => `${current} из ${max} кадр/с`,
+    decodeGpu: "видеокарта",
+    decodeCpu: "процессор",
+    noCameras: "Нет работающих камер.",
+    settingsTitle: "Ограничения",
+    settingsDescription: "Сервер сам снижает частоту кадров, чтобы не выходить за предел.",
+    cpuLimit: "Предел загрузки процессора",
+    cpuLimitHint:
+      "Выше предела сначала упрощается живое видео, потом замедляется анализ. Подсчёт не опускается ниже 4 кадров в секунду.",
+    adaptive: "Экономить, когда в кадре тихо",
+    adaptiveHint:
+      "Камера, на которой ничего не движется, анализирует кадры реже и ускоряется, как только что-то появится.",
+    idleFps: "Частота в тишине, кадр/с",
+    idleFpsHint: "Одного кадра в секунду хватает, чтобы заметить машину или человека.",
+    idleFpsRange: "От 0,2 до 5",
+    saved: "Ограничения сохранены",
+  },
   toasts: {
     cameraAdded: (camera: string) => `Камера «${camera}» добавлена`,
     addFailed: "Не удалось добавить камеру",

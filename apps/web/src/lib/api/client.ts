@@ -23,6 +23,10 @@ export type LoadingSession = Schemas["LoadingSessionRead"];
 export type LoadingSessionPage = Schemas["LoadingSessionPage"];
 export type LoadingSummary = Schemas["LoadingSummary"];
 export type LoadingTotals = Schemas["LoadingTotals"];
+export type SystemResources = Schemas["SystemResources"];
+export type PerformanceSettings = Schemas["PerformanceSettings"];
+export type Activity = Schemas["Activity"];
+export type LoadLevel = Schemas["LoadLevelName"];
 
 /** Direct API origin, used for long-lived connections (MJPEG and SSE). */
 export const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8100").replace(

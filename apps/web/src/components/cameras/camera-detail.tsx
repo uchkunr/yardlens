@@ -20,7 +20,17 @@ import { ApiError, type Camera, type YardEvent } from "@/lib/api/client";
 import { useCamera, useRecentEvents } from "@/lib/api/queries";
 import { sortedCounts } from "@/lib/format";
 
-function Stat({ label, value, icon }: { label: string; value: ReactNode; icon: ReactNode }) {
+function Stat({
+  label,
+  value,
+  icon,
+  hint,
+}: {
+  label: string;
+  value: ReactNode;
+  icon: ReactNode;
+  hint?: ReactNode;
+}) {
   return (
     <div className="bg-card flex items-center gap-3 rounded-xl border p-4">
       <div className="bg-muted text-muted-foreground flex size-9 shrink-0 items-center justify-center rounded-lg [&_svg]:size-4">
@@ -29,6 +39,11 @@ function Stat({ label, value, icon }: { label: string; value: ReactNode; icon: R
       <div className="min-w-0">
         <div className="text-muted-foreground truncate text-xs">{label}</div>
         <div className="truncate text-lg font-semibold tabular-nums">{value}</div>
+        {hint ? (
+          <div className="text-muted-foreground truncate text-xs" title={typeof hint === "string" ? hint : undefined}>
+            {hint}
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -85,6 +100,7 @@ function CameraStats({ camera }: { camera: Camera }) {
         label={t.camera.inferenceRate}
         value={t.camera.fps(f.decimal(runtime.measured_fps, 1))}
         icon={<Gauge aria-hidden />}
+        hint={runtime.status === "online" ? t.camera.modes[runtime.activity] : null}
       />
     </div>
   );

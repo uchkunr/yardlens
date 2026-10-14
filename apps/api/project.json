@@ -47,6 +47,13 @@
         "command": "uv run yardlens-api"
       }
     },
+    "bench": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "apps/api",
+        "command": "uv run yardlens-bench"
+      }
+    },
     "lint": {
       "executor": "nx:run-commands",
       "cache": true,

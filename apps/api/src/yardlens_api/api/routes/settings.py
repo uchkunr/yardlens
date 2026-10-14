@@ -38,6 +38,7 @@ def _read(container: Container) -> SettingsRead:
     telegram = container.settings_store.telegram()
     return SettingsRead(
         detection=container.settings_store.detection(),
+        performance=container.settings_store.performance(),
         telegram=TelegramSettingsRead(
             enabled=telegram.enabled,
             bot_token_set=bool(telegram.bot_token),
@@ -90,6 +91,10 @@ async def update_settings(
         if merged.enabled and not (merged.bot_token and merged.chat_id):
             raise InvalidSettingsError("Bot token and chat ID are required to enable Telegram")
         await store.save_telegram(session, merged)
+
+    if payload.performance is not None:
+        await store.save_performance(session, payload.performance)
+        container.monitor.refresh()
 
     return _read(container)
 

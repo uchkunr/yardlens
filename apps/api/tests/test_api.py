@@ -48,7 +48,12 @@ async def test_camera_crud(client: httpx.AsyncClient) -> None:
         "line_in": 0,
         "line_out": 0,
         "loading": None,
+        "activity": "active",
+        "target_fps": 0.0,
+        "hardware_decoding": False,
+        "plate_stream_open": False,
     }
+    assert created["plate_url"] is None
 
     listed = (await client.get("/api/cameras")).json()
     assert [camera["id"] for camera in listed] == [camera_id]
@@ -73,6 +78,17 @@ async def test_camera_crud(client: httpx.AsyncClient) -> None:
     assert too_few.status_code == 422
     unzoned = await client.patch(f"/api/cameras/{camera_id}", json={"zone": None})
     assert unzoned.json()["zone"] is None
+
+    main_stream = "rtsp://10.0.0.5:554/Streaming/Channels/101"
+    with_main = await client.patch(f"/api/cameras/{camera_id}", json={"plate_url": main_stream})
+    assert with_main.json()["plate_url"] == main_stream
+    not_rtsp = await client.patch(
+        f"/api/cameras/{camera_id}", json={"plate_url": "http://10.0.0.5/stream"}
+    )
+    assert not_rtsp.status_code == 422
+    assert not_rtsp.json()["detail"].startswith("Main stream: RTSP URL must start with")
+    without_main = await client.patch(f"/api/cameras/{camera_id}", json={"plate_url": ""})
+    assert without_main.json()["plate_url"] is None
 
     assert (await client.delete(f"/api/cameras/{camera_id}")).status_code == 204
     assert (await client.get(f"/api/cameras/{camera_id}")).status_code == 404
@@ -286,3 +302,34 @@ async def test_settings_roundtrip_masks_token(client: httpx.AsyncClient) -> None
 async def test_telegram_test_requires_credentials(client: httpx.AsyncClient) -> None:
     response = await client.post("/api/settings/telegram/test", json={})
     assert response.json() == {"success": False, "message": "Bot token and chat ID are required"}
+
+
+async def test_system_resources_and_performance_settings(client: httpx.AsyncClient) -> None:
+    response = await client.get("/api/system/resources")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["load"]["level"] == "normal"
+    assert body["load"]["cpu_limit_percent"] == 75
+    assert body["load"]["adaptive"] is True
+    assert body["cpu"]["logical_cpus"] >= 1
+    assert body["memory"]["total_bytes"] > 0
+    assert body["inference"]["model"] == "yolo26n.pt"
+    assert body["cameras"] == []
+
+    settings = (await client.get("/api/settings")).json()
+    assert settings["performance"] == {
+        "cpu_limit_percent": 75,
+        "adaptive_fps": True,
+        "idle_fps": 1.0,
+    }
+
+    performance = {"cpu_limit_percent": 60, "adaptive_fps": False, "idle_fps": 0.5}
+    saved = await client.put("/api/settings", json={"performance": performance})
+    assert saved.status_code == 200
+    assert saved.json()["performance"] == performance
+    load = (await client.get("/api/system/resources")).json()["load"]
+    assert load["cpu_limit_percent"] == 60
+    assert load["adaptive"] is False
+
+    too_low = await client.put("/api/settings", json={"performance": {"cpu_limit_percent": 10}})
+    assert too_low.status_code == 422

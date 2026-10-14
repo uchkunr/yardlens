@@ -29,8 +29,16 @@ class Settings(BaseSettings):
     )
 
     default_model: str = "yolo26n.pt"
+    # auto | cpu | cuda:0 | mps | intel:cpu | intel:gpu
     inference_device: str = "auto"
-    inference_threads: int = Field(default=4, ge=1, le=64)
+    # auto: OpenVINO on the CPU, PyTorch on GPUs | pytorch | openvino
+    inference_backend: Literal["auto", "pytorch", "openvino"] = "auto"
+    # Threads for inference on the CPU; 0 picks them from the number of cores.
+    inference_threads: int = Field(default=0, ge=0, le=64)
+    # Decode camera video on the GPU (Intel Quick Sync, NVIDIA, AMD) where possible.
+    hardware_decode: bool = True
+    # Run below normal priority so the OS, database and web app stay responsive under load.
+    low_priority: bool = True
     workers_enabled: bool = True
 
     stream_jpeg_quality: int = Field(default=80, ge=30, le=95)

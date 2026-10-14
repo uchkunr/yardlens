@@ -19,6 +19,8 @@ export function createFormatters(locale: Locale, messages: Messages) {
   const dateLocale = DATE_FNS_LOCALES[locale];
   const integer = new Intl.NumberFormat(tag);
   const percent = new Intl.NumberFormat(tag, { style: "percent" });
+  const gigabytes = new Intl.NumberFormat(tag, { style: "unit", unit: "gigabyte", maximumFractionDigits: 1 });
+  const megabytes = new Intl.NumberFormat(tag, { style: "unit", unit: "megabyte", maximumFractionDigits: 0 });
   const dateTime = new Intl.DateTimeFormat(tag, {
     month: "short",
     day: "numeric",
@@ -41,6 +43,10 @@ export function createFormatters(locale: Locale, messages: Messages) {
       new Intl.NumberFormat(tag, { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(value),
 
     percent: (ratio: number) => percent.format(ratio),
+
+    /** "15,6 ГБ" / "15.6 GB"; megabytes below a gigabyte. */
+    bytes: (value: number) =>
+      value >= 2 ** 30 ? gigabytes.format(value / 2 ** 30) : megabytes.format(value / 2 ** 20),
 
     dateTime: (iso: string) => dateTime.format(new Date(iso)),
 

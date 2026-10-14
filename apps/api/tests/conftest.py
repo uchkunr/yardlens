@@ -46,6 +46,7 @@ class FakeDetector:
         self._script = script
         self.calls = 0
         self.model = "yolo26n.pt"
+        self.sizes: list[int | None] = []
 
     @property
     def status(self) -> DetectorStatus:
@@ -55,11 +56,23 @@ class FakeDetector:
     def class_names(self) -> Sequence[str]:
         return COCO_CLASSES
 
+    @property
+    def busy_seconds(self) -> float:
+        return 0.0
+
     def load(self, model_name: str) -> None:
         self.model = model_name
 
-    def detect(self, frame: Frame, *, confidence: float, classes: Sequence[str]) -> sv.Detections:
+    def detect(
+        self,
+        frame: Frame,
+        *,
+        confidence: float,
+        classes: Sequence[str],
+        imgsz: int | None = None,
+    ) -> sv.Detections:
         self.calls += 1
+        self.sizes.append(imgsz)
         return self._script(self.calls)
 
 

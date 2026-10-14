@@ -1,0 +1,32 @@
+# YardLens API. Adjust User and the paths, then:
+#   sudo cp deploy/linux/yardlens-*.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now yardlens-api yardlens-web
+# Run `bun run setup` once beforehand: it installs the Python environment and the schema.
+
+[Unit]
+Description=YardLens API
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=yardlens
+WorkingDirectory=/opt/yardlens/apps/api
+# uv from the official installer lives in ~/.local/bin; adjust if it is elsewhere.
+ExecStart=/home/yardlens/.local/bin/uv run --no-sync yardlens-api
+Environment=YARDLENS_ENVIRONMENT=production
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+
+# A hard ceiling on top of the app's own governor, for a 6-core / 16 GB server: at most four cores'
+# worth of CPU and 8 GB of memory, so the database and the operating system always have room.
+CPUQuota=400%
+MemoryHigh=6G
+MemoryMax=8G
+Nice=5
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6
+
+[Install]
+WantedBy=multi-user.target

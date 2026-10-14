@@ -17,6 +17,9 @@ __pycache__/
 # Runtime data (database, snapshots, downloaded models and videos)
 apps/api/data/
 
+# Service logs (deploy/windows/register-tasks.ps1)
+apps/*/logs/
+
 # Env files
 .env
 .env.*

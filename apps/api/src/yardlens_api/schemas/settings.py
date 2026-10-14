@@ -27,6 +27,19 @@ class DetectionSettings(BaseModel):
     )
 
 
+class PerformanceSettings(BaseModel):
+    cpu_limit_percent: Annotated[int, Field(ge=30, le=95)] = Field(
+        default=75,
+        description="CPU load the governor keeps the machine under, by lowering frame rates",
+    )
+    adaptive_fps: bool = Field(
+        default=True, description="Slow down inference on cameras where nothing moves"
+    )
+    idle_fps: Annotated[float, Field(ge=0.2, le=5.0)] = Field(
+        default=1.0, description="Inference rate of a camera while nothing moves"
+    )
+
+
 class TelegramSettings(BaseModel):
     """Stored form, including the secret bot token. Never returned by the API."""
 
@@ -62,6 +75,7 @@ class TelegramSettingsUpdate(BaseModel):
 class SettingsRead(BaseModel):
     detection: DetectionSettings
     telegram: TelegramSettingsRead
+    performance: PerformanceSettings
     available_models: list[str]
     available_classes: list[str]
 
@@ -69,6 +83,7 @@ class SettingsRead(BaseModel):
 class SettingsUpdate(BaseModel):
     detection: DetectionSettings | None = None
     telegram: TelegramSettingsUpdate | None = None
+    performance: PerformanceSettings | None = None
 
 
 class TelegramTestRequest(BaseModel):

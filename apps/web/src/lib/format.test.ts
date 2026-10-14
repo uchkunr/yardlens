@@ -53,6 +53,12 @@ describe("format helpers", () => {
     expect(ru.shortDate("2026-10-14")).toBe("14 окт.");
   });
 
+  test("bytes switch from megabytes to gigabytes", () => {
+    expect(plain(en.bytes(820 * 2 ** 20))).toBe("820 MB");
+    expect(plain(en.bytes(15.6 * 2 ** 30))).toBe("15.6 GB");
+    expect(plain(ru.bytes(15.6 * 2 ** 30))).toBe("15,6 ГБ");
+  });
+
   test("formatPlate spaces Uzbek plates and leaves others alone", () => {
     expect(formatPlate("01A123BC")).toBe("01 A 123 BC");
     expect(formatPlate("01123ABC")).toBe("01 123 ABC");
@@ -85,6 +91,9 @@ describe("error messages", () => {
     );
     expect(translateServerMessage("Value error, Counting line points must be distinct", "ru")).toBe(
       "Точки линии подсчёта должны различаться",
+    );
+    expect(translateServerMessage("Main stream: RTSP URL must start with rtsp:// or rtsps://", "ru")).toBe(
+      "Основной поток: Адрес RTSP должен начинаться с rtsp:// или rtsps://",
     );
   });
 

@@ -14,9 +14,15 @@ dependencies = [
     "fast-alpr[onnx]>=0.4.0",
     "fastapi>=0.143.0",
     "httpx>=0.28.1",
+    # GPU load for the resource monitor (NVIDIA only; nothing happens without the driver).
+    "nvidia-ml-py>=13.615.71",
     # Excel export of loading sessions.
     "openpyxl>=3.1.5",
     "opencv-python-headless>=5.0.0.93",
+    # Fast inference on the CPU and Intel integrated graphics: models are converted once, cached.
+    "openvino>=2026.4.1",
+    # CPU and memory readings and process priority for the load governor.
+    "psutil>=7.2.2",
     "pydantic>=2.14.0",
     "pydantic-settings>=2.15.0",
     "sqlalchemy[asyncio]>=2.1.4",
@@ -38,6 +44,7 @@ dependencies = [
 yardlens-api = "yardlens_api.main:main"
 db-setup = "yardlens_api.db_setup:main"
 seed = "yardlens_api.seed:main"
+yardlens-bench = "yardlens_api.bench:main"
 
 [build-system]
 requires = ["uv_build>=0.12.23,<0.13.0"]

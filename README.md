@@ -41,10 +41,15 @@ both apps as Nx continuous tasks; pick one with ↑/↓ and press Enter to see i
 is kept in a cookie and read on the server, so pages render in it from the first paint. Telegram
 notifications have their own language under **Settings → Integrations**.
 
-**GPU.** Inference runs on an NVIDIA GPU when there is one (in half precision), on Apple silicon
-through Metal, and on the CPU otherwise; **Settings → System** shows which. On Windows, setup
-installs PyTorch's CUDA 13.0 build, which needs an RTX 20-series card or newer and still works
-without one; PyPI's Linux build already includes CUDA.
+**GPU and CPU.** Inference runs on an NVIDIA GPU when there is one (in half precision), on Apple
+silicon through Metal, and otherwise on the CPU through OpenVINO: the model is converted once, in a
+few seconds, and cached next to the weights. Camera video is decoded on the GPU too where FFmpeg can
+(Intel Quick Sync, NVIDIA, AMD). **Settings → Load** shows what runs where and how busy the machine
+is. On Windows, setup installs PyTorch's CUDA 13.0 build, which needs an RTX 20-series card or newer
+and still works without one; PyPI's Linux build already includes CUDA.
+
+`bun run dev` is for development. On a server, build once and run without it; see
+[Running on a server](#running-on-a-server).
 
 ## How it works
 
@@ -53,9 +58,11 @@ RTSP · HLS · MJPEG / JPEG snapshot · YouTube (yt-dlp) · local file
   │
   ▼
 CameraWorker: one per camera, three threads
-  ├─ capture     keeps only the newest frame, paced by stream timestamps, reconnects with backoff
-  ├─ inference   every 1/fps s: shared YOLO ─▶ ByteTrack ─▶ LineZone ─▶ events + JPEG snapshots
+  ├─ capture     takes every frame off the stream, converts only the ones in use, reconnects
+  ├─ inference   paced by activity: shared YOLO ─▶ ByteTrack ─▶ LineZone ─▶ events + snapshots
   └─ render      up to 15 fps while watched: latest tracks, extrapolated ─▶ annotated MJPEG
+  ▲
+  └─ ResourceMonitor  CPU, memory and GPU every 2 s ─▶ governor ─▶ frame rates for every worker
   │
   ▼  thread → event loop hand-off
 EventRecorder
@@ -87,10 +94,8 @@ looking at spends its CPU on decoding and detection alone.
 
 **One model, shared and serialized.** Ultralytics models aren't safe for concurrent `predict` calls,
 so every worker goes through a single lazily loaded model behind a lock. Memory stays flat and
-behaviour stays predictable; the cost is throughput (see [Limitations](#limitations)). On the CPU,
-PyTorch is held to `YARDLENS_INFERENCE_THREADS` threads and its OpenMP threads wait passively: by
-default they spin for about 200 ms after every inference, which with a few cameras kept every core
-busy without making detection any faster.
+behaviour stays predictable; the cost is throughput (see [Limitations](#limitations)). How the
+machine's cores are shared out is described in [Performance and load](#performance-and-load).
 
 **Events, not detections.** Workers never persist per-frame detections. They emit five event types:
 `object_entered`, `line_crossed_in`, `line_crossed_out`, `camera_online` and `camera_offline`. A
@@ -188,6 +193,96 @@ hundred frames with two classes, `truck` and `sack` (in CVAT or Label Studio, sa
 model on it (`yolo train data=bay.yaml model=yolo26n.pt`; about an hour on a GPU). Put the resulting
 `.pt` file into `apps/api/data/models` and it appears under **Settings → Detection**. Keep the name
 `truck` for the vehicle class: that is how YardLens knows a vehicle from cargo.
+## Performance and load
+
+The goal is a server that never chokes: cameras get the CPU they need while something happens, give
+it back while nothing does, and slow down in a set order when the machine runs out.
+
+### Where the CPU goes
+
+Measured with `bun run bench` on the sample 4K clip, on an i7-14700K:
+
+| Stage | CPU time per frame | How often |
+| --- | --- | --- |
+| Decoding 4K H.264 | 15 ms on the CPU, 3.6 ms with GPU decoding | Every frame of the stream, 25 a second |
+| Turning a decoded 4K frame into an image | 18–23 ms | Only frames that are used |
+| YOLO26n, PyTorch on the CPU | 50 ms | Each inference |
+| YOLO26n, OpenVINO, 2 threads | 35 ms; 17 ms for a cropped bay at 416 px | Each inference |
+| YOLO26n on an RTX 4070 | 16 ms, mostly pre- and post-processing | Each inference |
+
+### What keeps it down
+
+- **Inference follows activity.** A camera runs at its configured rate while something moves,
+  appears or crosses the line, and for 8 s after. With a vehicle parked in a loading bay and nothing
+  else moving it runs at 3 fps, and with nothing moving at all at 1 fps (**Settings → Load**). A
+  still scene needs one frame a second to notice that something changed.
+- **Only frames in use are converted.** Capture keeps up with the stream, but converts a frame to an
+  image only when inference or a viewer is due one. On the 4K clip this halves the cost of an idle
+  camera; with GPU decoding as well it falls to about a fifth.
+- **GPU decoding when available.** FFmpeg decodes on Intel Quick Sync, NVIDIA or AMD where it can,
+  and falls back to the CPU on its own; a camera whose GPU decoding fails switches to the CPU for
+  good.
+- **Sub-stream for analysis, main stream for plates.** IP cameras usually offer a full-resolution
+  main stream and a light sub-stream. Give the camera the sub-stream and put the main stream under
+  **Main stream for plates**: it is opened only while a parked vehicle's plate is being read and
+  closed 15 s after, instead of being decoded all day.
+- **OpenVINO on the CPU.** Without an NVIDIA GPU the model runs on OpenVINO, which needs about half
+  the time and a third less CPU than PyTorch, on Intel and AMD alike. The PyTorch model serves while
+  the converted copy is prepared; a retrained model is converted again.
+- **Loading bays look at the bay only.** A camera with a loading zone runs the model on the zone and
+  counting line plus a margin, at a matching input size (down to 320 px instead of 640) when that
+  covers no more than 60% of the frame.
+- **A fixed thread budget.** Every library would otherwise start a thread per core. Inference gets a
+  third of the physical cores (at most 4), FFmpeg 2 threads per stream, OpenCV 2 and plate OCR 1–2;
+  a six-core machine gives inference 2 threads. `YARDLENS_INFERENCE_THREADS` overrides it.
+- **Below-normal priority.** The operating system, PostgreSQL and the dashboard stay responsive
+  even when the cameras keep the CPU busy.
+
+### The governor
+
+Every 2 s the resource monitor reads CPU, memory, GPU and how busy the detector is, and compares the
+busiest of them with the CPU limit (75% by default, **Settings → Load**):
+
+| Level | When | Live view | Inference |
+| --- | --- | --- | --- |
+| Normal | Under the limit | 15 fps | As configured |
+| Busy | Over the limit for 4 s | 8 fps | As configured |
+| High | 4 s more | 4 fps | 70% of the configured rate, idle cameras at half rate |
+| Overload | 4 s more | 2 fps | 50% of the configured rate |
+
+Counting never drops below 4 fps (or the camera's own rate, if lower), so no crossing is missed. The
+governor steps back down one level after 10 s at least 15 points under the limit, and memory above
+92% raises it to *High* right away. The level, the readings of the last three minutes and each
+camera's current rate are under **Settings → Load** and at `GET /api/system/resources`.
+
+### Sizing a server
+
+`bun run bench [video]` runs the camera pipeline on a recorded clip with the model, backend and
+threads the API would use, then prints the cost of each stage, the load per camera when idle, in
+standby and active, and how many cameras can be active at once under the limit. Run it on the
+server with a clip from the real camera. For the cameras themselves: H.264 rather than H.265, 10–12
+fps, and the sub-stream for analysis. On a CPU-only server an Intel i5-12400 (not the F model) is
+worth choosing over the 12400F or a Ryzen 5 5600: its integrated graphics decode the video.
+
+### Running on a server
+
+```bash
+bun install
+bun run setup
+bun run build
+bun run start   # API on :8100, dashboard on :3100
+```
+
+`bun run dev` compiles pages on demand and restarts the API on every file change, which costs more
+than the cameras do. To start YardLens with the machine:
+
+- **Linux:** systemd units are in [`deploy/linux`](deploy/linux). Adjust the user and paths, copy
+  them to `/etc/systemd/system` and run `systemctl enable --now yardlens-api yardlens-web`. They add
+  a hard ceiling (`CPUQuota`, `MemoryMax`) on top of the governor.
+- **Windows:** [`deploy/windows/register-tasks.ps1`](deploy/windows/register-tasks.ps1) registers
+  two scheduled tasks that start at boot, run below normal priority and restart if they stop. Run
+  `bun run build` first, then the script from an elevated PowerShell.
+
 ## API
 
 Everything lives under `/api`. The full schema is at `/docs`.
@@ -195,6 +290,7 @@ Everything lives under `/api`. The full schema is at `/docs`.
 | Endpoint | Purpose |
 | --- | --- |
 | `GET /api/health` | Version, uptime, cameras online, model and device |
+| `GET /api/system/resources` | CPU, memory and GPU load, the governor's level and each camera's current rate |
 | `GET, POST /api/cameras` | List and create cameras |
 | `POST /api/cameras/test` | Grab one frame from a source without saving it |
 | `GET, PATCH, DELETE /api/cameras/{id}` | Read, update (the running worker picks up the change), delete |
@@ -209,7 +305,7 @@ Everything lives under `/api`. The full schema is at `/docs`.
 | `GET /api/loading/sessions` | Loading history: filter by plate, camera and time; with totals |
 | `GET /api/loading/sessions/export` | The same history as an Excel file |
 | `GET, PATCH /api/loading/sessions/{id}` | One loading session; `PATCH` fixes its plate by hand |
-| `GET, PUT /api/settings` | Detection and Telegram settings |
+| `GET, PUT /api/settings` | Detection, Telegram and performance settings |
 | `POST /api/settings/telegram/test` | Send a test message |
 
 Event snapshots are served as static files from `/media/snapshots/`.
@@ -234,8 +330,11 @@ cp apps/web/.env.example apps/web/.env.local
 | `YARDLENS_LOG_JSON` | `false` | One JSON object per log line |
 | `YARDLENS_DATA_DIR` | `data` | Snapshots, model weights, videos |
 | `YARDLENS_DEFAULT_MODEL` | `yolo26n.pt` | Used until changed in Settings |
-| `YARDLENS_INFERENCE_DEVICE` | `auto` | `auto` (NVIDIA GPU, then Apple Metal, else CPU), `cpu`, `mps`, `cuda:0` |
-| `YARDLENS_INFERENCE_THREADS` | `4` | PyTorch CPU threads; matters when inference runs on the CPU |
+| `YARDLENS_INFERENCE_DEVICE` | `auto` | `auto` (NVIDIA GPU, then Apple Metal, else CPU), `cpu`, `cuda:0`, `mps`, `intel:gpu` |
+| `YARDLENS_INFERENCE_BACKEND` | `auto` | `auto` (OpenVINO on the CPU, PyTorch on GPUs), `pytorch`, `openvino` |
+| `YARDLENS_INFERENCE_THREADS` | `0` | CPU threads for inference; `0` picks them from the number of cores |
+| `YARDLENS_HARDWARE_DECODE` | `true` | Decode camera video on the GPU where FFmpeg can |
+| `YARDLENS_LOW_PRIORITY` | `true` | Run below normal priority so the rest of the system stays responsive |
 | `YARDLENS_STREAM_FPS` | `15` | Live view frame rate, independent of inference FPS |
 | `YARDLENS_STREAM_JPEG_QUALITY` | `80` | Quality of the live stream |
 | `YARDLENS_MAX_FRAME_WIDTH` | `1280` | Wider frames are downscaled before inference and streaming |
@@ -265,6 +364,8 @@ server-side.
 | `bun run test` | `bun test`, pytest |
 | `bun run format` | Ruff fix and format |
 | `bun run gen:api` | Regenerate `apps/web/src/lib/api/schema.d.ts` from the running API |
+| `bun run bench [video]` | Measure what a camera costs on this machine (see [Sizing a server](#sizing-a-server)) |
+| `bun run start` | Production build of the dashboard and the API without reloading |
 
 Nx caches lint, typecheck and test. The API tests need neither Postgres nor model weights: they run
 against SQLite in a temp directory, with a fake detector injected through
@@ -277,14 +378,19 @@ apps/
 │   ├── db/schema.sql
 │   ├── src/yardlens_api/
 │   │   ├── main.py               app factory, lifespan, retention task
-│   │   ├── api/routes/           health, cameras, streams, events, stats, loading, settings
+│   │   ├── bench.py              `yardlens-bench`: cost of a camera on this machine
+│   │   ├── api/routes/           health, system, cameras, streams, events, stats, loading, settings
 │   │   ├── core/                 settings (YARDLENS_*), logging, errors
 │   │   ├── db/, schemas/         SQLAlchemy models, Pydantic v2 schemas
 │   │   └── services/
 │   │       ├── sources.py        source validation, URL resolution, frame readers
 │   │       ├── camera_worker.py  capture, inference and render threads
 │   │       ├── camera_manager.py worker lifecycle, live reconfiguration
-│   │       ├── detector.py       shared YOLO model
+│   │       ├── detector.py       shared YOLO model, PyTorch or OpenVINO
+│   │       ├── pacing.py         inference rate by activity, analysis region
+│   │       ├── governor.py       load levels and the frame rates they allow
+│   │       ├── resources.py      thread budget, priority, resource monitor
+│   │       ├── plate_stream.py   main stream opened on demand for plates
 │   │       ├── analyzer.py       ByteTrack, line counting, annotation
 │   │       ├── loading.py        loading-bay sessions: arrival, cargo, departure
 │   │       ├── plates.py         number plate reading and voting
@@ -297,17 +403,17 @@ apps/
         ├── app/                  overview, loading, cameras, events, settings
         ├── i18n/                 Russian (default) and English copy, formatting
         └── lib/api/              client and types generated from OpenAPI
+deploy/                           systemd units (Linux), startup tasks (Windows)
 ```
 
 ## Limitations
 
 - **No authentication.** Run it on a trusted network or behind a reverse proxy that handles auth.
-- **Decoding stays on the CPU.** Detection moves to the GPU, but FFmpeg still decodes every frame on
-  the CPU, and that grows with resolution and frame rate: a 4K stream at 25 fps takes about three
-  quarters of a core. Use a camera's sub-stream (720p or so) when it has one.
-- **Throughput is bounded by one model.** Inference is in-process and serialized. A GPU handles
-  many cameras; a nano model on the CPU handles a handful at 2–5 fps each. Past that you want a
-  separate inference service.
+- **Every frame is still decoded.** Without GPU decoding a 4K stream at 25 fps keeps about a third
+  of a core busy even when nothing is converted; frames in use add their conversion on top. Give
+  cameras their sub-stream (720p–1080p) where they have one.
+- **Throughput is bounded by one model.** Inference is in-process and serialized. Past what
+  `bun run bench` reports for your machine, you want a GPU or a separate inference service.
 - **Extrapolation can drift.** An object that brakes or turns sharply may wander off its box until the
   next inference corrects it. Snapshots aren't affected.
 - **`object_entered` can over-count.** At low inference rates, crowded or fast scenes can split one

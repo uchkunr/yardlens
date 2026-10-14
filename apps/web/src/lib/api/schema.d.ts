@@ -21,6 +21,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/system/resources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Resources
+         * @description Machine load, what the governor allows right now and how fast each camera runs.
+         */
+        get: operations["resources_api_system_resources_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/cameras": {
         parameters: {
             query?: never;
@@ -346,6 +366,12 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * Activity
+         * @description What a camera sees, which sets how often it runs inference (see ``services.pacing``).
+         * @enum {string}
+         */
+        Activity: "active" | "standby" | "idle";
         /** CameraCount */
         CameraCount: {
             /** Camera Id */
@@ -378,6 +404,27 @@ export interface components {
             inference_fps: number;
             line?: components["schemas"]["CountingLine"] | null;
             zone?: components["schemas"]["LoadingZone"] | null;
+            /**
+             * Plate Url
+             * @description High-resolution main stream (RTSP), opened only to read number plates while `url` is the camera's light sub-stream
+             */
+            plate_url?: string | null;
+        };
+        /** CameraLoad */
+        CameraLoad: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            activity: components["schemas"]["Activity"];
+            /** Target Fps */
+            target_fps: number;
+            /** Measured Fps */
+            measured_fps: number;
+            /** Max Fps */
+            max_fps: number;
+            /** Hardware Decoding */
+            hardware_decoding: boolean;
         };
         /** CameraRead */
         CameraRead: {
@@ -394,6 +441,8 @@ export interface components {
             inference_fps: number;
             line: components["schemas"]["CountingLine"] | null;
             zone: components["schemas"]["LoadingZone"] | null;
+            /** Plate Url */
+            plate_url: string | null;
             /**
              * Created At
              * Format: date-time
@@ -438,6 +487,29 @@ export interface components {
             line_out: number;
             /** @description The loading session in progress, for loading-bay cameras */
             loading?: components["schemas"]["LoadingSessionRead"] | null;
+            /**
+             * @description active: something moves, full rate; standby: a vehicle stands in the bay; idle: nothing moves, a trickle of frames
+             * @default active
+             */
+            activity: components["schemas"]["Activity"];
+            /**
+             * Target Fps
+             * @description Inference rate the camera runs at now
+             * @default 0
+             */
+            target_fps: number;
+            /**
+             * Hardware Decoding
+             * @description Video is decoded on the GPU
+             * @default false
+             */
+            hardware_decoding: boolean;
+            /**
+             * Plate Stream Open
+             * @description The main stream is open to read a plate
+             * @default false
+             */
+            plate_stream_open: boolean;
         };
         /**
          * CameraStatus
@@ -491,6 +563,11 @@ export interface components {
             inference_fps?: number | null;
             line?: components["schemas"]["CountingLine"] | null;
             zone?: components["schemas"]["LoadingZone"] | null;
+            /**
+             * Plate Url
+             * @description High-resolution main stream (RTSP), opened only to read number plates while `url` is the camera's light sub-stream
+             */
+            plate_url?: string | null;
         };
         /** ClassCount */
         ClassCount: {
@@ -512,6 +589,23 @@ export interface components {
             x2: number;
             /** Y2 */
             y2: number;
+        };
+        /** CpuInfo */
+        CpuInfo: {
+            /**
+             * Percent
+             * @description Whole machine
+             */
+            percent: number;
+            /**
+             * Process Percent
+             * @description YardLens's share of the whole machine
+             */
+            process_percent: number;
+            /** Logical Cpus */
+            logical_cpus: number;
+            /** Physical Cores */
+            physical_cores: number;
         };
         /** DailyLoading */
         DailyLoading: {
@@ -597,6 +691,17 @@ export interface components {
          * @enum {string}
          */
         EventType: "object_entered" | "line_crossed_in" | "line_crossed_out" | "camera_online" | "camera_offline" | "vehicle_arrived" | "loading_completed";
+        /** GpuInfo */
+        GpuInfo: {
+            /** Name */
+            name: string | null;
+            /** Percent */
+            percent: number | null;
+            /** Memory Used Bytes */
+            memory_used_bytes: number | null;
+            /** Memory Total Bytes */
+            memory_total_bytes: number | null;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -640,6 +745,55 @@ export interface components {
             /** Line Out */
             line_out: number;
         };
+        /** InferenceInfo */
+        InferenceInfo: {
+            /** Model */
+            model: string;
+            /**
+             * Backend
+             * @description pytorch or openvino
+             */
+            backend: string;
+            /** Device */
+            device: string;
+            /** Threads */
+            threads: number | null;
+            /**
+             * Optimizing
+             * @description An OpenVINO copy of the model is being prepared
+             */
+            optimizing: boolean;
+            /**
+             * Busy Percent
+             * @description Share of time the detector spends on inference
+             */
+            busy_percent: number;
+        };
+        /** LoadInfo */
+        LoadInfo: {
+            level: components["schemas"]["LoadLevelName"];
+            /** Cpu Limit Percent */
+            cpu_limit_percent: number;
+            /** Adaptive */
+            adaptive: boolean;
+            /**
+             * Fps Scale
+             * @description Applied to each camera's maximum inference rate
+             */
+            fps_scale: number;
+            /** Idle Fps */
+            idle_fps: number;
+            /**
+             * Stream Fps
+             * @description Live view frame rate allowed now
+             */
+            stream_fps: number;
+        };
+        /**
+         * LoadLevelName
+         * @enum {string}
+         */
+        LoadLevelName: "normal" | "busy" | "high" | "overload";
         /** LoadingSessionPage */
         LoadingSessionPage: {
             /** Items */
@@ -771,6 +925,57 @@ export interface components {
             /** Points */
             points: components["schemas"]["ZonePoint"][];
         };
+        /** MemoryInfo */
+        MemoryInfo: {
+            /** Percent */
+            percent: number;
+            /** Used Bytes */
+            used_bytes: number;
+            /** Total Bytes */
+            total_bytes: number;
+            /**
+             * Process Bytes
+             * @description Resident memory of the YardLens API
+             */
+            process_bytes: number;
+        };
+        /** PerformanceSettings */
+        PerformanceSettings: {
+            /**
+             * Cpu Limit Percent
+             * @description CPU load the governor keeps the machine under, by lowering frame rates
+             * @default 75
+             */
+            cpu_limit_percent: number;
+            /**
+             * Adaptive Fps
+             * @description Slow down inference on cameras where nothing moves
+             * @default true
+             */
+            adaptive_fps: boolean;
+            /**
+             * Idle Fps
+             * @description Inference rate of a camera while nothing moves
+             * @default 1
+             */
+            idle_fps: number;
+        };
+        /** ResourcePoint */
+        ResourcePoint: {
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Cpu Percent */
+            cpu_percent: number;
+            /** Process Cpu Percent */
+            process_cpu_percent: number;
+            /** Memory Percent */
+            memory_percent: number;
+            /** Gpu Percent */
+            gpu_percent: number | null;
+        };
         /**
          * SessionStatus
          * @enum {string}
@@ -780,6 +985,7 @@ export interface components {
         SettingsRead: {
             detection: components["schemas"]["DetectionSettings"];
             telegram: components["schemas"]["TelegramSettingsRead"];
+            performance: components["schemas"]["PerformanceSettings"];
             /** Available Models */
             available_models: string[];
             /** Available Classes */
@@ -789,6 +995,7 @@ export interface components {
         SettingsUpdate: {
             detection?: components["schemas"]["DetectionSettings"] | null;
             telegram?: components["schemas"]["TelegramSettingsUpdate"] | null;
+            performance?: components["schemas"]["PerformanceSettings"] | null;
         };
         /**
          * SourceType
@@ -819,6 +1026,26 @@ export interface components {
             per_camera: components["schemas"]["CameraCount"][];
             /** Hourly */
             hourly: components["schemas"]["HourlyBucket"][];
+        };
+        /** SystemResources */
+        SystemResources: {
+            /**
+             * Sampled At
+             * @description None until the first sample (2 s)
+             */
+            sampled_at: string | null;
+            cpu: components["schemas"]["CpuInfo"];
+            memory: components["schemas"]["MemoryInfo"];
+            gpu: components["schemas"]["GpuInfo"] | null;
+            inference: components["schemas"]["InferenceInfo"];
+            load: components["schemas"]["LoadInfo"];
+            /** Cameras */
+            cameras: components["schemas"]["CameraLoad"][];
+            /**
+             * History
+             * @description The last few minutes, oldest first
+             */
+            history: components["schemas"]["ResourcePoint"][];
         };
         /** TelegramSettingsRead */
         TelegramSettingsRead: {
@@ -926,6 +1153,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthRead"];
+                };
+            };
+        };
+    };
+    resources_api_system_resources_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemResources"];
                 };
             };
         };

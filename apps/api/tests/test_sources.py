@@ -103,6 +103,19 @@ def test_file_reader_loops_past_the_end(video_file: Path) -> None:
     assert first.shape == (120, 160, 3)
 
 
+def test_frames_can_be_skipped_without_converting_them(video_file: Path) -> None:
+    resolved = resolve_source(SourceType.FILE, str(video_file))
+    # Asking for hardware decoding is safe anywhere: OpenCV falls back to the CPU.
+    reader = VideoCaptureReader(resolved, hardware_decode=True, threads=1)
+    try:
+        assert all(reader.grab() for _ in range(20)), "looped files never run out"
+        frame = reader.retrieve()
+        assert frame is not None
+        assert frame.shape == (120, 160, 3)
+    finally:
+        reader.close()
+
+
 def test_iter_jpeg_frames_handles_split_chunks_and_noise() -> None:
     first = b"\xff\xd8first-image\xff\xd9"
     second = b"\xff\xd8second\xff\xd9"
@@ -143,14 +156,22 @@ class _TimedFrames:
         return self._fps
 
     @property
+    def hardware_decoding(self) -> bool:
+        return False
+
+    @property
     def position_seconds(self) -> float | None:
         return self._timestamps[self._index]
 
-    def read(self) -> Frame | None:
+    def grab(self) -> bool:
         self._index += 1
-        if self._index >= len(self._timestamps):
-            return None
+        return self._index < len(self._timestamps)
+
+    def retrieve(self) -> Frame | None:
         return np.zeros((2, 2, 3), dtype=np.uint8)
+
+    def read(self) -> Frame | None:
+        return self.retrieve() if self.grab() else None
 
     def close(self) -> None:
         return None

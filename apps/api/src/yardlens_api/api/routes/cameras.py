@@ -44,6 +44,7 @@ def camera_config(camera: Camera) -> CameraConfig:
         inference_fps=camera.inference_fps,
         line=CountingLine.model_validate(camera.line) if camera.line else None,
         zone=LoadingZone.model_validate(camera.zone) if camera.zone else None,
+        plate_url=camera.plate_url,
     )
 
 
@@ -58,6 +59,7 @@ def to_camera_read(camera: Camera, container: Container) -> CameraRead:
         inference_fps=camera.inference_fps,
         line=CountingLine.model_validate(camera.line) if camera.line else None,
         zone=LoadingZone.model_validate(camera.zone) if camera.zone else None,
+        plate_url=camera.plate_url,
         created_at=camera.created_at,
         updated_at=camera.updated_at,
         runtime=CameraRuntime(
@@ -71,6 +73,10 @@ def to_camera_read(camera: Camera, container: Container) -> CameraRead:
             line_in=state.line_in,
             line_out=state.line_out,
             loading=to_session_read(state.loading, camera.name) if state.loading else None,
+            activity=state.activity,
+            target_fps=state.target_fps,
+            hardware_decoding=state.hardware_decoding,
+            plate_stream_open=state.plate_stream_open,
         ),
     )
 
@@ -87,6 +93,17 @@ def _validate(container: Container, source_type: SourceType, url: str) -> None:
         validate_source(source_type, url, base_dir=container.settings.data_dir)
     except SourceError as exc:
         raise InvalidSourceError(str(exc)) from exc
+
+
+def _validate_plate_url(plate_url: str | None) -> str | None:
+    """Empty means none; otherwise it has to be an RTSP stream."""
+    if not plate_url:
+        return None
+    try:
+        validate_source(SourceType.RTSP, plate_url)
+    except SourceError as exc:
+        raise InvalidSourceError(f"Main stream: {exc}") from exc
+    return plate_url
 
 
 async def _commit(session: SessionDep) -> None:
@@ -108,6 +125,7 @@ async def create_camera(
     payload: CameraCreate, container: ContainerDep, session: SessionDep
 ) -> CameraRead:
     _validate(container, payload.source_type, payload.url)
+    plate_url = _validate_plate_url(payload.plate_url)
     camera = Camera(
         name=payload.name,
         source_type=payload.source_type.value,
@@ -116,6 +134,7 @@ async def create_camera(
         inference_fps=payload.inference_fps,
         line=payload.line.model_dump() if payload.line else None,
         zone=payload.zone.model_dump() if payload.zone else None,
+        plate_url=plate_url,
     )
     session.add(camera)
     await _commit(session)
@@ -212,6 +231,8 @@ async def update_camera(
         camera.line = payload.line.model_dump() if payload.line else None
     if "zone" in changes:
         camera.zone = payload.zone.model_dump() if payload.zone else None
+    if "plate_url" in changes:
+        camera.plate_url = _validate_plate_url(payload.plate_url)
 
     await _commit(session)
     await session.refresh(camera)

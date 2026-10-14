@@ -52,6 +52,7 @@ const RU_RULES: Rule[] = [
     /^Cargo classes must be among the detected classes$/,
     () => "Груз нужно выбрать среди распознаваемых классов",
   ],
+  [/^Main stream: ([\s\S]+)$/, (reason) => `Основной поток: ${translateServerMessage(reason, "ru")}`],
 ];
 
 export function translateServerMessage(message: string, locale: Locale): string {

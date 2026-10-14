@@ -2,10 +2,12 @@
 
 Each worker owns three daemon threads:
 
-* **capture** — connects to the source (with exponential backoff), reads frames in real time and
-  keeps only the most recent one, so slow consumers never build a queue.
-* **inference** — at ``inference_fps`` takes the latest frame, runs detection, tracking and line
-  counting, and emits events with snapshots.
+* **capture** — connects to the source (with exponential backoff) and takes every frame off the
+  stream in real time, but converts and publishes only the frames that inference or a viewer
+  is about to use; the rest are dropped undecoded, so slow consumers never build a queue.
+* **inference** — takes the latest frame, runs detection, tracking and line counting, and emits
+  events with snapshots. Its rate follows ``Pacer``: the configured ``inference_fps`` while
+  something moves, a trickle while the scene is still, both scaled by the load governor.
 * **render** — at up to ``stream_fps`` draws the latest tracks onto each new frame and publishes
   the annotated JPEG for live viewing, so the feed stays smooth even at a low inference rate.
   It only runs while someone is watching (see ``latest_jpeg``).
@@ -32,12 +34,19 @@ import cv2
 import numpy as np
 from numpy.typing import NDArray
 
-from yardlens_api.core.enums import LOADING_VEHICLE_CLASSES, CameraStatus, EventType, SourceType
+from yardlens_api.core.enums import (
+    LOADING_VEHICLE_CLASSES,
+    Activity,
+    CameraStatus,
+    EventType,
+    SourceType,
+)
 from yardlens_api.core.errors import SourceError
 from yardlens_api.schemas.camera import CountingLine, LoadingZone
 from yardlens_api.schemas.settings import DetectionSettings
 from yardlens_api.services.analyzer import Box, FrameAnalyzer, Observation, TrackedObject, highlight
 from yardlens_api.services.detector import Detector
+from yardlens_api.services.governor import Limits
 from yardlens_api.services.loading import (
     LoadingTracker,
     SessionChange,
@@ -45,6 +54,15 @@ from yardlens_api.services.loading import (
     SessionUpdate,
     largest,
 )
+from yardlens_api.services.pacing import (
+    ACTIVE_HOLD_SECONDS,
+    Pacer,
+    Region,
+    analysis_region,
+    crop_region,
+    input_size,
+)
+from yardlens_api.services.plate_stream import PlateStream
 from yardlens_api.services.plates import PlateReader
 from yardlens_api.services.sources import FrameReader, open_reader, resolve_source
 
@@ -67,6 +85,8 @@ class CameraConfig:
     inference_fps: float
     line: CountingLine | None
     zone: LoadingZone | None = None
+    plate_url: str | None = None
+    """The camera's high-resolution main stream, opened only to read plates."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,6 +113,10 @@ class RuntimeState:
     line_in: int = 0
     line_out: int = 0
     loading: SessionState | None = None
+    activity: Activity = Activity.ACTIVE
+    target_fps: float = 0.0
+    hardware_decoding: bool = False
+    plate_stream_open: bool = False
 
 
 class WorkerListener(Protocol):
@@ -120,6 +144,11 @@ class WorkerOptions:
     # long the bay stays quiet (no vehicle, no cargo) before it counts as gone.
     loading_arrive_seconds: float = 15.0
     loading_depart_seconds: float = 60.0
+    # Inference stays at full rate this long after the last movement.
+    active_hold_seconds: float = ACTIVE_HOLD_SECONDS
+    # Decode video on the GPU where possible, and cap FFmpeg's threads per stream (0: its default).
+    hardware_decode: bool = False
+    decode_threads: int = 0
 
 
 def next_backoff(current: float) -> float:
@@ -157,6 +186,7 @@ class CameraWorker:
         listener: WorkerListener,
         options: WorkerOptions,
         plate_reader: PlateReader | None = None,
+        limits: Callable[[], Limits] | None = None,
     ) -> None:
         self.config = config
         self._detector = detector
@@ -164,6 +194,8 @@ class CameraWorker:
         self._listener = listener
         self._options = options
         self._plate_reader = plate_reader
+        fixed = Limits(stream_fps=options.stream_fps, jpeg_quality=options.jpeg_quality)
+        self._limits: Callable[[], Limits] = limits or (lambda: fixed)
 
         self._stop = threading.Event()
         self._frame_ready = threading.Condition()
@@ -172,6 +204,12 @@ class CameraWorker:
         self._frame_seq = 0
         self._last_frame_at: datetime | None = None
         self._last_frame_monotonic = 0.0
+        # Capture converts a frame only when one of these is due (see ``_frame_wanted``).
+        self._next_inference_at = 0.0
+        self._inference_seq = 0
+        self._last_published = float("-inf")
+        self._hardware_decode = options.hardware_decode
+        self._hardware_decoding = False
 
         self._scale_lock = threading.Lock()
         self._scaled_seq = 0
@@ -191,6 +229,9 @@ class CameraWorker:
 
         self._analyzer = FrameAnalyzer(fps=config.inference_fps, line=config.line, zone=config.zone)
         self._loading = self._new_tracker(config.zone)
+        self._pacer = Pacer(config.inference_fps, hold_seconds=options.active_hold_seconds)
+        self._region: Region | None = analysis_region(config.line, config.zone)
+        self._plate_stream = self._new_plate_stream(config)
         self._capture_thread = threading.Thread(
             target=self._capture_loop, name=f"capture-{config.id}", daemon=True
         )
@@ -218,6 +259,8 @@ class CameraWorker:
         for thread in (self._render_thread, self._inference_thread, self._capture_thread):
             if thread.is_alive():
                 thread.join(max(0.0, deadline - time.monotonic()))
+        if self._plate_stream is not None:
+            self._plate_stream.stop()
 
     @property
     def stopped(self) -> bool:
@@ -226,9 +269,15 @@ class CameraWorker:
     # -- public state ------------------------------------------------------------------------
 
     def state(self) -> RuntimeState:
+        now = time.monotonic()
+        limits = self._limits()
         with self._state_lock:
             width, height = self._frame_size or (None, None)
             return RuntimeState(
+                activity=self._pacer.activity(now) if limits.adaptive else Activity.ACTIVE,
+                target_fps=round(self._pacer.fps(now, limits), 2),
+                hardware_decoding=self._hardware_decoding,
+                plate_stream_open=bool(self._plate_stream and self._plate_stream.connected),
                 status=self._status,
                 last_error=self._last_error,
                 last_frame_at=self._last_frame_at,
@@ -265,11 +314,14 @@ class CameraWorker:
             return self._scaled_frame
 
     def update_config(self, config: CameraConfig) -> None:
-        """Apply changes that do not require reconnecting (name, counting line, loading zone)."""
+        """Apply changes that do not require reconnecting (name, counting line, loading zone,
+        plate stream)."""
         closed: SessionUpdate | None = None
+        retired: PlateStream | None = None
         with self._state_lock:
             self._analyzer.set_line(config.line)
             self._analyzer.zone = config.zone
+            self._region = analysis_region(config.line, config.zone)
             tracker = self._loading
             if config.zone is None:
                 closed = tracker.close(datetime.now(UTC), time.monotonic()) if tracker else None
@@ -278,9 +330,25 @@ class CameraWorker:
                 self._loading = self._new_tracker(config.zone)
             else:
                 tracker.zone = config.zone
+            if config.plate_url != self.config.plate_url:
+                retired = self._plate_stream
+                self._plate_stream = self._new_plate_stream(config)
         self.config = config
+        if retired is not None:
+            retired.stop()
         if closed is not None and tracker is not None:
             self._report_session(closed, tracker)
+
+    def _new_plate_stream(self, config: CameraConfig) -> PlateStream | None:
+        """Idle until a loading session asks for it, so creating it costs nothing."""
+        if not config.plate_url:
+            return None
+        return PlateStream(
+            config.plate_url,
+            timeout=self._options.connect_timeout,
+            hardware_decode=self._options.hardware_decode,
+            decode_threads=self._options.decode_threads,
+        )
 
     def _new_tracker(self, zone: LoadingZone | None) -> LoadingTracker | None:
         if zone is None:
@@ -363,6 +431,13 @@ class CameraWorker:
 
             if self._stop.is_set():
                 break
+            if not received and reader.hardware_decoding:
+                # Opened on the GPU but never produced a frame: decode on the CPU from now on.
+                logger.warning(
+                    "Hardware decoding failed; using the CPU",
+                    extra={"camera_id": self.config.id},
+                )
+                self._hardware_decode = False
             if received:
                 backoff = BACKOFF_INITIAL_SECONDS
             self._set_status(CameraStatus.OFFLINE, "Stream ended or stalled; reconnecting")
@@ -377,21 +452,37 @@ class CameraWorker:
         source = resolve_source(
             self.config.source_type, self.config.url, base_dir=self._options.base_dir
         )
-        return open_reader(
+        reader = open_reader(
             source,
             timeout=self._options.connect_timeout,
             snapshot_interval=max(1.0 / self.config.inference_fps, 0.5),
             stop_event=self._stop,
+            hardware_decode=self._hardware_decode,
+            decode_threads=self._options.decode_threads,
         )
+        self._hardware_decoding = reader.hardware_decoding
+        return reader
+
+    def _frame_wanted(self, now: float) -> bool:
+        """Whether the frame just grabbed is worth converting: inference is due and has not been
+        handed a frame yet, or someone is watching and the live view is due a new one."""
+        if self._latest_frame is None:
+            return True
+        if now >= self._next_inference_at and self._frame_seq == self._inference_seq:
+            return True
+        if now - self._last_viewed <= self._options.viewer_idle_seconds:
+            return now - self._last_published >= 1.0 / self._limits().stream_fps
+        return False
 
     def _pump_frames(self, reader: FrameReader) -> bool:
         """Read until the stream ends or stalls. Returns whether any frame was received."""
         received = False
         empty_reads = 0
         while not self._stop.is_set():
-            frame = reader.read()
+            grabbed = reader.grab()
             now = time.monotonic()
-            if frame is None:
+            frame = reader.retrieve() if grabbed and self._frame_wanted(now) else None
+            if not grabbed or (frame is None and self._latest_frame is None):
                 empty_reads += 1
                 stalled = received and now - self._last_frame_monotonic > STALL_TIMEOUT_SECONDS
                 if empty_reads >= _MAX_CONSECUTIVE_EMPTY_READS or stalled:
@@ -399,29 +490,34 @@ class CameraWorker:
                 continue
             empty_reads = 0
             received = True
+            self._last_frame_monotonic = now
+            self._last_frame_at = datetime.now(UTC)
+            if self._status != CameraStatus.ONLINE:
+                self._set_status(CameraStatus.ONLINE)
+            if frame is None:
+                continue  # taken off the stream, nobody needs it converted
             source_size = (int(frame.shape[1]), int(frame.shape[0]))
             # Kept at full size; consumers take the reduced frame through ``_scaled``.
             with self._frame_ready:
                 self._latest_frame = frame
                 self._latest_frame_time = now
                 self._frame_seq += 1
-                self._last_frame_at = datetime.now(UTC)
-                self._last_frame_monotonic = now
+                self._last_published = now
                 self._frame_ready.notify_all()
             with self._state_lock:
                 self._frame_size = source_size
-            if self._status != CameraStatus.ONLINE:
-                self._set_status(CameraStatus.ONLINE)
         return received
 
     # -- inference ---------------------------------------------------------------------------
 
     def _inference_loop(self) -> None:
-        interval = 1.0 / self.config.inference_fps
         last_seq = 0
         next_tick = time.monotonic()
         processed_times: list[float] = []
         while not self._stop.is_set():
+            # Tells capture when to convert the next frame for us.
+            self._next_inference_at = next_tick
+            self._stop.wait(max(0.0, next_tick - time.monotonic()))
             with self._frame_ready:
                 while self._frame_seq == last_seq and not self._stop.is_set():
                     self._frame_ready.wait(timeout=1.0)
@@ -429,7 +525,7 @@ class CameraWorker:
                         self._clear_visible()
                 frame = self._latest_frame
                 frame_time = self._latest_frame_time
-                last_seq = self._frame_seq
+                last_seq = self._inference_seq = self._frame_seq
             if self._stop.is_set():
                 break
             if frame is None:
@@ -441,15 +537,15 @@ class CameraWorker:
                 logger.exception("Inference failed", extra={"camera_id": self.config.id})
 
             now = time.monotonic()
-            processed_times = [t for t in processed_times if now - t < 5.0] + [now]
+            processed_times = [t for t in processed_times if now - t < 10.0] + [now]
             with self._state_lock:
                 self._measured_fps = (
                     (len(processed_times) - 1) / (processed_times[-1] - processed_times[0])
                     if len(processed_times) > 1
                     else 0.0
                 )
-            next_tick = max(next_tick + interval, now)
-            self._stop.wait(max(0.0, next_tick - time.monotonic()))
+                fps = self._pacer.fps(now, self._limits())
+            next_tick = max(next_tick + 1.0 / fps, now)
         self._finish_loading()
 
     def _is_stale(self) -> bool:
@@ -461,13 +557,26 @@ class CameraWorker:
 
     def _process(self, frame: Frame, frame_time: float, raw: Frame | None = None) -> None:
         settings = self._detection_settings()
+        region = self._region
+        crop, (left, top) = crop_region(frame, region)
         detections = self._detector.detect(
-            frame, confidence=settings.confidence, classes=settings.classes
+            crop,
+            confidence=settings.confidence,
+            classes=settings.classes,
+            imgsz=input_size(crop.shape[1], crop.shape[0]) if region is not None else None,
         )
+        if (left or top) and len(detections) > 0:
+            offset = np.array([left, top, left, top], dtype=detections.xyxy.dtype)
+            detections.xyxy = detections.xyxy + offset
         with self._state_lock:
             observation = self._analyzer.process(frame, detections, frame_time)
             self._visible = observation.visible
             tracker = self._loading
+            self._pacer.observe(
+                frame_time,
+                moving=observation.moving,
+                standby=tracker is not None and tracker.occupied,
+            )
         cargo = frozenset(settings.cargo_classes) if tracker is not None else frozenset[str]()
         if tracker is not None:
             self._update_loading(
@@ -530,22 +639,30 @@ class CameraWorker:
                 t=frame_time, now=now, parked=parked, loaded=loaded, unloaded=unloaded
             )
             read_plate = self._plate_reader is not None and tracker.wants_plate(frame_time)
+            plate_pending = self._plate_reader is not None and tracker.plate_pending
+            plate_stream = self._plate_stream
+        if plate_pending and plate_stream is not None:
+            plate_stream.want()
         vehicle = largest(parked)
         if update is not None:
             self._report_session(update, tracker, frame=frame, vehicle=vehicle)
         if read_plate and vehicle is not None:
-            self._read_plate(tracker, vehicle.box, frame, raw, frame_time)
+            source = plate_stream.latest() if plate_stream is not None else None
+            self._read_plate(
+                tracker, vehicle.box, frame, raw if source is None else source, frame_time
+            )
 
     def _read_plate(
-        self, tracker: LoadingTracker, box: Box, frame: Frame, raw: Frame, frame_time: float
+        self, tracker: LoadingTracker, box: Box, frame: Frame, source: Frame, frame_time: float
     ) -> None:
+        """Read the plate inside ``box`` (in ``frame`` coordinates) from ``source``: the same
+        picture at full resolution, from this stream or the camera's main stream."""
         reader = self._plate_reader
         if reader is None:
             return
-        # Read from the full-resolution frame: plates are small and every pixel helps.
-        scale = raw.shape[1] / frame.shape[1]
+        scale = (source.shape[1] / frame.shape[1], source.shape[0] / frame.shape[0])
         try:
-            reads = reader.read(crop_box(raw, box, scale=scale, margin=0.1))
+            reads = reader.read(crop_box(source, box, scale=scale, margin=0.1))
         except Exception:
             logger.exception("Plate reading failed", extra={"camera_id": self.config.id})
             reads = []
@@ -631,10 +748,10 @@ class CameraWorker:
     # -- render ------------------------------------------------------------------------------
 
     def _render_loop(self) -> None:
-        interval = 1.0 / self._options.stream_fps
         last_seq = 0
         while not self._stop.is_set():
             started = time.monotonic()
+            limits = self._limits()
             with self._frame_ready:
                 while self._frame_seq == last_seq and not self._stop.is_set():
                     self._frame_ready.wait(timeout=1.0)
@@ -656,13 +773,14 @@ class CameraWorker:
                 scaled = self._scaled(last_seq, frame)
                 with self._state_lock:
                     annotated = self._analyzer.render(scaled, frame_time)
-                jpeg = encode_jpeg(annotated, self._options.jpeg_quality)
+                jpeg = encode_jpeg(annotated, limits.jpeg_quality)
             except Exception:
                 logger.exception("Rendering failed", extra={"camera_id": self.config.id})
             else:
                 with self._output_lock:
                     self._latest_jpeg = jpeg
                     self._jpeg_seq += 1
+            interval = 1.0 / limits.stream_fps
             self._stop.wait(max(0.0, interval - (time.monotonic() - started)))
 
     def _save_snapshot(self, frame: Frame, occurred_at: datetime) -> str | None:
@@ -708,9 +826,11 @@ def _session_image(session: SessionState, kind: str) -> Path:
     return Path("sessions", session.arrived_at.strftime("%Y/%m/%d"), f"{session.id}-{kind}.jpg")
 
 
-def crop_box(image: Frame, box: Box, *, scale: float, margin: float) -> Frame:
-    """The part of ``image`` under ``box`` (given at 1/``scale`` resolution), plus a margin."""
-    x1, y1, x2, y2 = (value * scale for value in box)
+def crop_box(image: Frame, box: Box, *, scale: tuple[float, float], margin: float) -> Frame:
+    """The part of ``image`` under ``box`` (given at 1/``scale`` resolution, horizontally and
+    vertically: a camera's two streams may differ in aspect), plus a margin."""
+    x1, x2 = box[0] * scale[0], box[2] * scale[0]
+    y1, y2 = box[1] * scale[1], box[3] * scale[1]
     pad_x, pad_y = (x2 - x1) * margin, (y2 - y1) * margin
     height, width = image.shape[:2]
     left, top = max(0, int(x1 - pad_x)), max(0, int(y1 - pad_y))

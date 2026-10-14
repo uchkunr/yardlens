@@ -44,6 +44,7 @@ export const queryKeys = {
   recentEvents: (cameraId?: number) => ["events", "recent", cameraId ?? "all"] as const,
   stats: ["stats"] as const,
   settings: ["settings"] as const,
+  resources: ["system", "resources"] as const,
   loading: ["loading"] as const,
   loadingSummary: (days: number) => ["loading", "summary", days] as const,
   loadingSessions: (filters: LoadingSessionFilters) => ["loading", "sessions", filters] as const,
@@ -333,4 +334,13 @@ export function prependRecentEvent(page: EventPage | undefined, event: YardEvent
     total: page.total + 1,
     items: [event, ...page.items].slice(0, RECENT_EVENTS_LIMIT),
   };
+}
+
+/** Machine load and what the governor allows; polled while the load panel is open. */
+export function useSystemResources() {
+  return useQuery({
+    queryKey: queryKeys.resources,
+    queryFn: () => unwrap(api.GET("/api/system/resources")),
+    refetchInterval: 2_000,
+  });
 }

@@ -34,13 +34,25 @@ function cameraSchema(t: Messages) {
     source_type: z.enum(["rtsp", "http", "hls", "youtube", "file"]),
     url: z.string().trim().min(1, m.urlRequired).max(2048),
     inference_fps: z.number({ error: t.common.enterNumber }).min(0.2, m.fpsMin).max(15, m.fpsMax),
+    plate_url: z
+      .string()
+      .trim()
+      .max(2048)
+      .refine((value) => value === "" || /^rtsps?:\/\/./i.test(value), m.plateUrlInvalid),
     enabled: z.boolean(),
   });
 }
 
 type CameraFormValues = z.infer<ReturnType<typeof cameraSchema>>;
 
-const DEFAULTS: CameraFormValues = { name: "", source_type: "rtsp", url: "", inference_fps: 3, enabled: true };
+const DEFAULTS: CameraFormValues = {
+  name: "",
+  source_type: "rtsp",
+  url: "",
+  inference_fps: 3,
+  plate_url: "",
+  enabled: true,
+};
 
 export function CameraFormDialog({
   open,
@@ -72,6 +84,7 @@ export function CameraFormDialog({
             source_type: camera.source_type,
             url: camera.url,
             inference_fps: camera.inference_fps,
+            plate_url: camera.plate_url ?? "",
             enabled: camera.enabled,
           }
         : DEFAULTS,
@@ -88,8 +101,10 @@ export function CameraFormDialog({
 
   const onSubmit = form.handleSubmit((values) => {
     const done = { onSuccess: () => onOpenChange(false) };
-    if (camera) updateCamera.mutate({ id: camera.id, body: values }, done);
-    else createCamera.mutate(values, done);
+    // Only RTSP cameras have a separate main stream.
+    const body = { ...values, plate_url: values.source_type === "rtsp" && values.plate_url ? values.plate_url : null };
+    if (camera) updateCamera.mutate({ id: camera.id, body }, done);
+    else createCamera.mutate(body, done);
   });
 
   const saving = createCamera.isPending || updateCamera.isPending;
@@ -158,6 +173,23 @@ export function CameraFormDialog({
               />
               <FieldError errors={[form.formState.errors.url]} />
             </Field>
+
+            {sourceType === "rtsp" ? (
+              <Field data-invalid={Boolean(form.formState.errors.plate_url)}>
+                <FieldLabel htmlFor="camera-plate-url">{m.plateUrl}</FieldLabel>
+                <Input
+                  id="camera-plate-url"
+                  placeholder={m.plateUrlPlaceholder}
+                  autoComplete="off"
+                  spellCheck={false}
+                  className="font-mono text-xs"
+                  aria-invalid={Boolean(form.formState.errors.plate_url)}
+                  {...form.register("plate_url")}
+                />
+                <FieldDescription>{m.plateUrlHint}</FieldDescription>
+                <FieldError errors={[form.formState.errors.plate_url]} />
+              </Field>
+            ) : null}
 
             <div className="grid gap-5 sm:grid-cols-2">
               <Field data-invalid={Boolean(form.formState.errors.inference_fps)}>

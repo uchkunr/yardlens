@@ -194,13 +194,19 @@ class LoadingTracker:
             return self._close(wall(last_activity))
         return SessionUpdate(change, replace(session)) if change else None
 
+    @property
+    def occupied(self) -> bool:
+        """A vehicle stands in the zone or a session is open."""
+        return self._parked_now or self._session is not None
+
+    @property
+    def plate_pending(self) -> bool:
+        """A vehicle is parked and its plate reading has not settled yet."""
+        return self._parked_now and not self._votes.settled
+
     def wants_plate(self, t: float) -> bool:
         """Whether to read the plate of the vehicle parked now (until the reading settles)."""
-        return (
-            self._parked_now
-            and not self._votes.settled
-            and t - self._last_plate_attempt >= PLATE_READ_INTERVAL_SECONDS
-        )
+        return self.plate_pending and t - self._last_plate_attempt >= PLATE_READ_INTERVAL_SECONDS
 
     def add_plate_reads(self, reads: Sequence[PlateRead], t: float) -> SessionUpdate | None:
         """Pool plate readings; returns an update when the open session's plate changed."""

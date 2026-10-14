@@ -65,6 +65,7 @@ class Camera(Base):
     inference_fps: Mapped[float] = mapped_column(Float, default=3.0)
     line: Mapped[dict[str, Any] | None] = mapped_column(default=None)
     zone: Mapped[dict[str, Any] | None] = mapped_column(default=None)
+    plate_url: Mapped[str | None] = mapped_column(String(2048), default=None)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
 

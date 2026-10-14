@@ -22,7 +22,16 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 
 from yardlens_api.api.deps import Container
-from yardlens_api.api.routes import cameras, events, health, loading, settings, stats, streams
+from yardlens_api.api.routes import (
+    cameras,
+    events,
+    health,
+    loading,
+    settings,
+    stats,
+    streams,
+    system,
+)
 from yardlens_api.api.routes.cameras import camera_config
 from yardlens_api.core.config import Settings, get_settings
 from yardlens_api.core.errors import register_exception_handlers
@@ -35,9 +44,15 @@ from yardlens_api.services.detector import Detector, YoloDetector
 from yardlens_api.services.event_bus import EventBus
 from yardlens_api.services.event_recorder import EventRecorder
 from yardlens_api.services.events import SNAPSHOTS_URL_PREFIX, purge_events_before
+from yardlens_api.services.governor import Budget
 from yardlens_api.services.loading_store import close_interrupted_sessions
 from yardlens_api.services.notifier import TelegramNotifier
 from yardlens_api.services.plates import FastAlprReader
+from yardlens_api.services.resources import (
+    ResourceMonitor,
+    apply_process_plan,
+    plan_resources,
+)
 from yardlens_api.services.settings_store import SettingsStore
 
 logger = logging.getLogger(__name__)
@@ -62,6 +77,7 @@ def create_app(
         if not container.detector.status.loaded:
             tasks.spawn(_load_model(container), "model-loader")
         tasks.spawn(_retention_loop(container), "retention")
+        container.monitor.start()
         container.recorder.start()
         await _start_workers(container)
         logger.info("YardLens API started", extra={"version": app.version})
@@ -71,6 +87,7 @@ def create_app(
             logger.info("Shutting down")
             await tasks.cancel_all()
             await container.cameras.shutdown()
+            await asyncio.to_thread(container.monitor.stop)
             await container.recorder.stop()
             await container.http_client.aclose()
             await container.engine.dispose()
@@ -88,7 +105,7 @@ def create_app(
         allow_headers=["*"],
     )
     register_exception_handlers(app)
-    for module in (health, cameras, streams, events, stats, loading, settings):
+    for module in (health, system, cameras, streams, events, stats, loading, settings):
         app.include_router(module.router, prefix="/api")
     app.mount(
         SNAPSHOTS_URL_PREFIX,
@@ -110,11 +127,39 @@ async def build_container(config: Settings, detector: Detector | None) -> Contai
     if interrupted:
         logger.info("Closed loading sessions cut off by a restart", extra={"count": interrupted})
 
+    plan = plan_resources(inference_threads=config.inference_threads)
+    apply_process_plan(plan, low_priority=config.low_priority and config.environment != "test")
+    logger.info(
+        "Resource plan",
+        extra={
+            "cores": plan.physical_cores,
+            "inference_threads": plan.inference_threads,
+            "decode_threads": plan.decode_threads,
+        },
+    )
     resolved_detector = detector or YoloDetector(
         models_dir=config.models_dir,
         model_name=store.detection().model,
         device=config.inference_device,
-        cpu_threads=config.inference_threads,
+        backend=config.inference_backend,
+        cpu_threads=plan.inference_threads,
+    )
+
+    def budget() -> Budget:
+        performance = store.performance()
+        return Budget(
+            cpu_limit_percent=performance.cpu_limit_percent,
+            adaptive=performance.adaptive_fps,
+            idle_fps=performance.idle_fps,
+            stream_fps=config.stream_fps,
+            jpeg_quality=config.stream_jpeg_quality,
+        )
+
+    monitor = ResourceMonitor(
+        plan=plan,
+        budget=budget,
+        detector_busy_seconds=lambda: resolved_detector.busy_seconds,
+        inference_on_gpu=lambda: resolved_detector.status.device.startswith(("cuda", "mps")),
     )
     bus = EventBus()
     http_client = httpx.AsyncClient()
@@ -140,12 +185,15 @@ async def build_container(config: Settings, detector: Detector | None) -> Contai
             stream_fps=config.stream_fps,
             loading_arrive_seconds=config.loading_arrive_seconds,
             loading_depart_seconds=config.loading_depart_seconds,
+            hardware_decode=config.hardware_decode,
+            decode_threads=plan.decode_threads,
         ),
         loop=asyncio.get_running_loop(),
         on_event=recorder.submit,
         on_status=recorder.publish_status,
         on_session=recorder.submit_session,
-        plate_reader=FastAlprReader() if detector is None else None,
+        plate_reader=FastAlprReader(threads=plan.plate_threads) if detector is None else None,
+        limits=monitor.limits,
         names=names,
         workers_enabled=config.workers_enabled,
     )
@@ -160,6 +208,7 @@ async def build_container(config: Settings, detector: Detector | None) -> Contai
         recorder=recorder,
         notifier=notifier,
         http_client=http_client,
+        monitor=monitor,
         started_at=datetime.now(UTC),
     )
 

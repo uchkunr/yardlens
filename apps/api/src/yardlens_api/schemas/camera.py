@@ -3,13 +3,21 @@ from typing import Annotated, Self
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
-from yardlens_api.core.enums import CameraStatus, SourceType
+from yardlens_api.core.enums import Activity, CameraStatus, SourceType
 from yardlens_api.schemas.loading import LoadingSessionRead
 
 Unit = Annotated[float, Field(ge=0.0, le=1.0)]
 CameraName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
 SourceUrl = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2048)]
 InferenceFps = Annotated[float, Field(ge=0.2, le=15.0)]
+PlateUrl = Annotated[
+    str | None,
+    StringConstraints(strip_whitespace=True, max_length=2048),
+    Field(
+        description="High-resolution main stream (RTSP), opened only to read number plates "
+        "while `url` is the camera's light sub-stream"
+    ),
+]
 
 
 class CountingLine(BaseModel):
@@ -50,6 +58,7 @@ class CameraCreate(BaseModel):
     inference_fps: InferenceFps = 3.0
     line: CountingLine | None = None
     zone: LoadingZone | None = None
+    plate_url: PlateUrl = None
 
 
 class CameraUpdate(BaseModel):
@@ -62,6 +71,7 @@ class CameraUpdate(BaseModel):
     inference_fps: InferenceFps | None = None
     line: CountingLine | None = None
     zone: LoadingZone | None = None
+    plate_url: PlateUrl = None
 
 
 class CameraRuntime(BaseModel):
@@ -77,6 +87,16 @@ class CameraRuntime(BaseModel):
     loading: LoadingSessionRead | None = Field(
         default=None, description="The loading session in progress, for loading-bay cameras"
     )
+    activity: Activity = Field(
+        default=Activity.ACTIVE,
+        description="active: something moves, full rate; standby: a vehicle stands in the bay; "
+        "idle: nothing moves, a trickle of frames",
+    )
+    target_fps: float = Field(default=0.0, description="Inference rate the camera runs at now")
+    hardware_decoding: bool = Field(default=False, description="Video is decoded on the GPU")
+    plate_stream_open: bool = Field(
+        default=False, description="The main stream is open to read a plate"
+    )
 
 
 class CameraRead(BaseModel):
@@ -90,6 +110,7 @@ class CameraRead(BaseModel):
     inference_fps: float
     line: CountingLine | None
     zone: LoadingZone | None
+    plate_url: str | None
     created_at: datetime
     updated_at: datetime
     runtime: CameraRuntime

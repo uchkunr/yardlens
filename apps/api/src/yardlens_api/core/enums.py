@@ -32,6 +32,14 @@ class SessionStatus(StrEnum):
     COMPLETED = "completed"
 
 
+class Activity(StrEnum):
+    """What a camera sees, which sets how often it runs inference (see ``services.pacing``)."""
+
+    ACTIVE = "active"
+    STANDBY = "standby"
+    IDLE = "idle"
+
+
 VEHICLE_CLASSES: frozenset[str] = frozenset({"car", "truck", "bus", "motorcycle", "bicycle"})
 # Vehicles that can park in a loading bay; a custom model should name its truck class "truck".
 LOADING_VEHICLE_CLASSES: frozenset[str] = frozenset({"car", "truck", "bus"})

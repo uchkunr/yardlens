@@ -14,6 +14,7 @@ from yardlens_api.services.camera_worker import (
     WorkerOptions,
 )
 from yardlens_api.services.detector import Detector
+from yardlens_api.services.governor import Limits
 from yardlens_api.services.loading import SessionState
 from yardlens_api.services.plates import PlateReader
 
@@ -45,6 +46,7 @@ class CameraManager:
         on_status: StatusHandler,
         on_session: SessionHandler | None = None,
         plate_reader: PlateReader | None = None,
+        limits: Callable[[], Limits] | None = None,
         names: dict[int, str] | None = None,
         workers_enabled: bool = True,
     ) -> None:
@@ -56,6 +58,7 @@ class CameraManager:
         self._on_status = on_status
         self._on_session = on_session
         self._plate_reader = plate_reader
+        self._limits = limits
         self._workers_enabled = workers_enabled
         self._workers: dict[int, CameraWorker] = {}
         self._names = names if names is not None else {}
@@ -99,6 +102,7 @@ class CameraManager:
             listener=self,
             options=self._options,
             plate_reader=self._plate_reader,
+            limits=self._limits,
         )
         self._workers[config.id] = worker
         worker.start()
@@ -134,6 +138,9 @@ class CameraManager:
         worker = self._workers.get(camera_id)
         return worker.state() if worker is not None else _DISABLED_STATE
 
+    def workers(self) -> list[CameraWorker]:
+        return list(self._workers.values())
+
     def online_count(self) -> int:
         return sum(
             1 for worker in self._workers.values() if worker.state().status == CameraStatus.ONLINE
@@ -141,7 +148,8 @@ class CameraManager:
 
 
 def _needs_restart(old: CameraConfig, new: CameraConfig) -> bool:
-    """Name, counting line and loading zone change live; source and rate need a new worker."""
+    """Name, counting line, loading zone and plate stream change live; source and rate need a
+    new worker."""
     return (old.source_type, old.url, old.inference_fps) != (
         new.source_type,
         new.url,
