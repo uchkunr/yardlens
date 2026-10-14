@@ -16,6 +16,7 @@ from yardlens_api.services.camera_worker import (
 from yardlens_api.services.detector import Detector
 from yardlens_api.services.governor import Limits
 from yardlens_api.services.loading import SessionState
+from yardlens_api.services.loading_store import InterruptedSession
 from yardlens_api.services.plates import PlateReader
 
 logger = logging.getLogger(__name__)
@@ -47,6 +48,7 @@ class CameraManager:
         on_session: SessionHandler | None = None,
         plate_reader: PlateReader | None = None,
         limits: Callable[[], Limits] | None = None,
+        detector_for: Callable[[str], Detector] | None = None,
         names: dict[int, str] | None = None,
         workers_enabled: bool = True,
     ) -> None:
@@ -59,6 +61,7 @@ class CameraManager:
         self._on_session = on_session
         self._plate_reader = plate_reader
         self._limits = limits
+        self._detector_for = detector_for
         self._workers_enabled = workers_enabled
         self._workers: dict[int, CameraWorker] = {}
         self._names = names if names is not None else {}
@@ -81,8 +84,11 @@ class CameraManager:
     def camera_name(self, camera_id: int) -> str:
         return self._names.get(camera_id, f"Camera {camera_id}")
 
-    def sync(self, config: CameraConfig, *, enabled: bool) -> None:
-        """Bring the worker for ``config`` in line with the desired configuration."""
+    def sync(
+        self, config: CameraConfig, *, enabled: bool, resume: InterruptedSession | None = None
+    ) -> None:
+        """Bring the worker for ``config`` in line with the desired configuration. ``resume`` is
+        a loading session cut off by a restart, for a newly started worker to carry on."""
         self._names[config.id] = config.name
         current = self._workers.get(config.id)
         if not enabled or not self._workers_enabled:
@@ -103,6 +109,8 @@ class CameraManager:
             options=self._options,
             plate_reader=self._plate_reader,
             limits=self._limits,
+            resume=resume,
+            detector_for=self._detector_for,
         )
         self._workers[config.id] = worker
         worker.start()
@@ -140,6 +148,14 @@ class CameraManager:
 
     def workers(self) -> list[CameraWorker]:
         return list(self._workers.values())
+
+    def models_in_use(self) -> set[str]:
+        """Models that running cameras name as their own."""
+        return {
+            worker.config.detection.model
+            for worker in self._workers.values()
+            if worker.config.detection is not None and worker.config.detection.model
+        }
 
     def online_count(self) -> int:
         return sum(

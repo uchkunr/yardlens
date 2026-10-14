@@ -345,6 +345,8 @@ export const en: Messages = {
     countingLine: "Counting line",
     loadingZone: "Loading zone",
     loadingBadge: "Loading",
+    detection: "Detection",
+    ownDetectionBadge: "Own detection",
     delete: "Delete",
     deleteTitle: "Delete this camera?",
     deleteDescription: "The camera stops immediately and all of its events and snapshots are permanently removed.",
@@ -408,7 +410,8 @@ export const en: Messages = {
 
   detection: {
     title: "Detection",
-    description: "Applies to every camera. Changes take effect on the next frame.",
+    description:
+      "General settings for every camera. A camera can have its own, under Detection in its menu. Changes take effect on the next frame.",
     model: "Model",
     modelHints: {
       "yolo26n.pt": "Nano · fastest, recommended for CPU",
@@ -478,6 +481,17 @@ export const en: Messages = {
     apiUrl: "API URL",
   },
 
+  cameraDetection: {
+    title: (camera) => `Detection: ${camera}`,
+    description:
+      "A camera normally follows the general settings. Here it can have its own, such as a model trained on the sacks in your warehouse, without touching the other cameras.",
+    own: "Own settings for this camera",
+    ownOn: "Only what differs from the general settings is stored; the rest follows them.",
+    ownOff: "The camera follows the general settings.",
+    generalModel: (model) => `${model} (general)`,
+    loadingClasses: "Loading the model and its classes…",
+    cargoHint: "Counted when it crosses the line and added to the vehicle in the bay.",
+  },
   load: {
     title: "Server load",
     description: "Updates every two seconds.",
@@ -487,6 +501,10 @@ export const en: Messages = {
     memory: "Memory",
     memoryUsed: (used: string, total: string) => `${used} of ${total}`,
     gpu: "Graphics card",
+    disk: "Disk",
+    diskFree: (free, total) => `${free} free of ${total}`,
+    imagesPaused:
+      "The disk is almost full: snapshots are not saved, counting goes on. Free up space on the data disk.",
     videoMemory: (used: string, total: string) => `Video memory: ${used} of ${total}`,
     history: "Last three minutes",
     total: "Total",

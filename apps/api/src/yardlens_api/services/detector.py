@@ -18,7 +18,7 @@ import os
 import threading
 import time
 import warnings
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -232,6 +232,7 @@ class YoloDetector:
         device: str = "auto",
         backend: str = "auto",
         cpu_threads: int = 2,
+        lock: threading.Lock | None = None,
     ) -> None:
         self._models_dir = models_dir
         self._model_name = model_name
@@ -242,7 +243,8 @@ class YoloDetector:
         self._quantize: int | None = None
         self._model: YOLO | None = None
         self._names: dict[int, str] = dict(enumerate(COCO_CLASSES))
-        self._lock = threading.Lock()
+        # Shared with the other models' detectors, so one inference runs at a time overall.
+        self._lock = lock or threading.Lock()
         self._generation = 0
         self._optimizing = False
         self._busy = 0.0
@@ -420,3 +422,42 @@ class YoloDetector:
             dtype=object,
         )
         return detections
+
+
+class ModelPool:
+    """Detectors for the models cameras use besides the general one, by model name.
+
+    Each is loaded on first use and shared by every camera that names it. ``retain`` unloads the
+    ones no camera needs any more. The general detector is not in the pool: changing the general
+    model swaps that one in place.
+    """
+
+    def __init__(self, factory: Callable[[str], Detector]) -> None:
+        self._factory = factory
+        self._detectors: dict[str, Detector] = {}
+        self._lock = threading.Lock()
+
+    def get(self, model_name: str) -> Detector:
+        """The detector for ``model_name``, loading it first if needed (blocking)."""
+        with self._lock:
+            detector = self._detectors.get(model_name)
+            if detector is None:
+                detector = self._factory(model_name)
+                self._detectors[model_name] = detector
+            return detector
+
+    def retain(self, model_names: set[str]) -> None:
+        with self._lock:
+            for name in [name for name in self._detectors if name not in model_names]:
+                del self._detectors[name]
+                logger.info("Unloaded detection model", extra={"model": name})
+
+    @property
+    def models(self) -> list[str]:
+        with self._lock:
+            return sorted(self._detectors)
+
+    @property
+    def busy_seconds(self) -> float:
+        with self._lock:
+            return sum(detector.busy_seconds for detector in self._detectors.values())

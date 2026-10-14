@@ -1,9 +1,10 @@
 "use client";
 
-import { Cctv, MoreHorizontal, Pencil, Plus, Ruler, SquareDashed, Trash2 } from "lucide-react";
+import { Cctv, MoreHorizontal, Pencil, Plus, Ruler, ScanSearch, SquareDashed, Trash2 } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
+import { CameraDetectionDialog } from "@/components/settings/camera-detection-dialog";
 import { CameraFormDialog } from "@/components/settings/camera-form-dialog";
 import { LineEditorDialog } from "@/components/settings/line-editor-dialog";
 import { ZoneEditorDialog } from "@/components/settings/zone-editor-dialog";
@@ -34,12 +35,13 @@ import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useI18n } from "@/i18n/provider";
 import type { Camera } from "@/lib/api/client";
-import { useCameras, useDeleteCamera, useToggleCamera } from "@/lib/api/queries";
+import { useCameras, useDeleteCamera, useSettings, useToggleCamera } from "@/lib/api/queries";
 
 type DialogState =
   | { kind: "form"; camera?: Camera }
   | { kind: "line"; camera: Camera }
   | { kind: "zone"; camera: Camera }
+  | { kind: "detection"; camera: Camera }
   | { kind: "delete"; camera: Camera };
 
 /** Deep links from other pages: `?new=1`, `?edit=<id>`, `?line=<id>`, `?zone=<id>`. */
@@ -57,6 +59,7 @@ function dialogFromParams(params: URLSearchParams, cameras: Camera[] | undefined
 
 export function CamerasSettings() {
   const cameras = useCameras();
+  const settings = useSettings();
   const toggleCamera = useToggleCamera();
   const deleteCamera = useDeleteCamera();
   const router = useRouter();
@@ -136,6 +139,11 @@ export function CamerasSettings() {
                             {s.loadingBadge}
                           </Badge>
                         ) : null}
+                        {camera.detection ? (
+                          <Badge variant="outline" className="shrink-0 font-normal">
+                            {s.ownDetectionBadge}
+                          </Badge>
+                        ) : null}
                       </div>
                       <div className="text-muted-foreground truncate font-mono text-xs" title={camera.url}>
                         {camera.url}
@@ -175,6 +183,12 @@ export function CamerasSettings() {
                           <DropdownMenuItem onSelect={() => setLocalDialog({ kind: "zone", camera })}>
                             <SquareDashed aria-hidden /> {s.loadingZone}
                           </DropdownMenuItem>
+                          <DropdownMenuItem
+                            disabled={!settings.data}
+                            onSelect={() => setLocalDialog({ kind: "detection", camera })}
+                          >
+                            <ScanSearch aria-hidden /> {s.detection}
+                          </DropdownMenuItem>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem variant="destructive" onSelect={() => setLocalDialog({ kind: "delete", camera })}>
                             <Trash2 aria-hidden /> {s.delete}
@@ -197,6 +211,14 @@ export function CamerasSettings() {
       />
       {dialog?.kind === "line" && current ? (
         <LineEditorDialog key={current.id} camera={current} onOpenChange={(open) => !open && close()} />
+      ) : null}
+      {dialog?.kind === "detection" && current && settings.data ? (
+        <CameraDetectionDialog
+          key={current.id}
+          camera={current}
+          settings={settings.data}
+          onOpenChange={(open) => !open && close()}
+        />
       ) : null}
       {dialog?.kind === "zone" && current ? (
         <ZoneEditorDialog key={current.id} camera={current} onOpenChange={(open) => !open && close()} />

@@ -15,4 +15,6 @@
   what has already been tried, and the step-by-step procedure are in
   [docs/sack-model.md](docs/sack-model.md). When the user asks for the main logic, the sack model
   or sack counting ("asosiy logic", "qop modeli", "qoplarni sanash"), start from that file.
-- The items to close before production are listed at the end of the same file.
+- The items to close before production are listed at the end of the same file; larger
+  architecture work (auth, inference process, WebRTC, migrations, licence) is in
+  [docs/roadmap.md](docs/roadmap.md).

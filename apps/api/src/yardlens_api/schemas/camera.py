@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_vali
 
 from yardlens_api.core.enums import Activity, CameraStatus, SourceType
 from yardlens_api.schemas.loading import LoadingSessionRead
+from yardlens_api.schemas.settings import CameraDetection
 
 Unit = Annotated[float, Field(ge=0.0, le=1.0)]
 CameraName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
@@ -59,6 +60,7 @@ class CameraCreate(BaseModel):
     line: CountingLine | None = None
     zone: LoadingZone | None = None
     plate_url: PlateUrl = None
+    detection: CameraDetection | None = None
 
 
 class CameraUpdate(BaseModel):
@@ -72,6 +74,9 @@ class CameraUpdate(BaseModel):
     line: CountingLine | None = None
     zone: LoadingZone | None = None
     plate_url: PlateUrl = None
+    detection: CameraDetection | None = Field(
+        default=None, description="The camera's own detection settings; null follows the general"
+    )
 
 
 class CameraRuntime(BaseModel):
@@ -111,6 +116,7 @@ class CameraRead(BaseModel):
     line: CountingLine | None
     zone: LoadingZone | None
     plate_url: str | None
+    detection: CameraDetection | None
     created_at: datetime
     updated_at: datetime
     runtime: CameraRuntime

@@ -1,6 +1,5 @@
 import asyncio
 import logging
-from collections.abc import Sequence
 
 from fastapi import APIRouter, status
 
@@ -8,13 +7,13 @@ from yardlens_api.api.deps import Container, ContainerDep, SessionDep
 from yardlens_api.core.errors import AppError
 from yardlens_api.core.i18n import TEST_MESSAGE
 from yardlens_api.schemas.settings import (
-    DetectionSettings,
     SettingsRead,
     SettingsUpdate,
     TelegramSettings,
     TelegramSettingsRead,
     TelegramTestRequest,
     TelegramTestResult,
+    detection_problem,
 )
 from yardlens_api.services.detector import available_models
 from yardlens_api.services.notifier import TelegramError
@@ -75,12 +74,13 @@ async def update_settings(
             except Exception as exc:
                 logger.exception("Model load failed", extra={"model": detection.model})
                 raise InvalidSettingsError(f"Could not load model: {exc}") from exc
-        problem = _detection_problem(detection, container.detector.class_names)
+        problem = detection_problem(detection, container.detector.class_names)
         if problem is not None:
             if detection.model != previous:
                 await _restore_model(container, previous)
             raise InvalidSettingsError(problem)
         await store.save_detection(session, detection)
+        container.models.retain(container.cameras.models_in_use() - {detection.model})
 
     if payload.telegram is not None:
         current = store.telegram()
@@ -99,20 +99,26 @@ async def update_settings(
     return _read(container)
 
 
-def _detection_problem(detection: DetectionSettings, class_names: Sequence[str]) -> str | None:
-    unknown = sorted(set(detection.classes) - set(class_names))
-    if unknown:
-        return f"Unknown classes: {', '.join(unknown)}"
-    if not set(detection.cargo_classes) <= set(detection.classes):
-        return "Cargo classes must be among the detected classes"
-    return None
-
-
 async def _restore_model(container: Container, model: str) -> None:
     try:
         await asyncio.to_thread(container.detector.load, model)
     except Exception:
         logger.exception("Could not restore the previous model", extra={"model": model})
+
+
+@router.get("/models/{model}/classes", response_model=list[str])
+async def model_classes(model: str, container: ContainerDep) -> list[str]:
+    """The classes a model detects, for picking a camera's own classes. Loads it if needed."""
+    if model not in available_models(container.settings.models_dir):
+        raise InvalidSettingsError(f"Unsupported model '{model}'")
+    if model == container.detector.status.model:
+        return list(container.detector.class_names)
+    try:
+        detector = await asyncio.to_thread(container.models.get, model)
+    except Exception as exc:
+        logger.exception("Model load failed", extra={"model": model})
+        raise InvalidSettingsError(f"Could not load model: {exc}") from exc
+    return list(detector.class_names)
 
 
 @router.post("/telegram/test", response_model=TelegramTestResult)

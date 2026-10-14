@@ -8,6 +8,7 @@ from yardlens_api.api.deps import ContainerDep
 from yardlens_api.schemas.system import (
     CameraLoad,
     CpuInfo,
+    DiskInfo,
     GpuInfo,
     InferenceInfo,
     LoadInfo,
@@ -91,6 +92,14 @@ async def resources(container: ContainerDep) -> SystemResources:
         sampled_at=wall(latest.at) if latest else None,
         cpu=cpu,
         memory=mem,
+        disk=DiskInfo(
+            percent=round(latest.disk_percent, 1),
+            free_bytes=latest.disk_free,
+            total_bytes=latest.disk_total,
+            images_paused=not limits.save_images,
+        )
+        if latest and latest.disk_total
+        else None,
         gpu=gpu,
         inference=InferenceInfo(
             model=detector.model,
@@ -99,6 +108,7 @@ async def resources(container: ContainerDep) -> SystemResources:
             threads=detector.threads,
             optimizing=detector.optimizing,
             busy_percent=round(latest.detector_busy * 100, 1) if latest else 0.0,
+            models=[detector.model, *container.models.models],
         ),
         load=LoadInfo(
             level=LEVEL_NAMES[limits.level],

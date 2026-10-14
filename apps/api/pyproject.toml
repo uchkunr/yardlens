@@ -45,6 +45,7 @@ yardlens-api = "yardlens_api.main:main"
 db-setup = "yardlens_api.db_setup:main"
 seed = "yardlens_api.seed:main"
 yardlens-bench = "yardlens_api.bench:main"
+yardlens-eval = "yardlens_api.evaluate:main"
 
 [build-system]
 requires = ["uv_build>=0.12.23,<0.13.0"]

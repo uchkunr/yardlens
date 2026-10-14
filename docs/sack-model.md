@@ -61,29 +61,34 @@ Zero-shot detection is not good enough to count; a trained detector is required.
    Aim for a `sack` mAP50 of 0.8 or more, then watch the predictions on a recording the model has
    not seen (`uv run yolo predict model=runs/detect/train/weights/best.pt source=bay-3.mp4`).
 6. **Deploy.** Copy `runs/detect/train/weights/best.pt` to `apps/api/data/models/bay-sacks.pt`.
-   Under **Settings → Распознавание**: model `bay-sacks.pt`, classes `truck` and `sack`, cargo
+   Give it to the bay camera only, so the other cameras keep the general model: camera menu →
+   **Распознавание** → own settings, model `bay-sacks.pt`, classes `truck` and `sack`, cargo
    `sack`. On a server without an NVIDIA GPU the OpenVINO copy is made on the first load.
 7. **Configure the camera.** The loading zone where the truck's wheels stand; the counting line
    across the conveyor where sacks pass just before they drop into the truck; analysis rate 8–15
    fps. If the camera has two streams, the sub-stream as the address and the main stream under
    **Основной поток для номеров**.
-8. **Check against a hand count.** Put three or more recorded loadings into `apps/api/data/videos`,
-   add each as a video-file camera, and compare the session's count with a count made by eye.
-   Off by more than one or two sacks per truck means more labelled frames, usually of the cases it
-   missed.
+8. **Check against a hand count.** Count three or more recorded loadings by eye, then run each
+   through the same pipeline, faster than real time, with the camera's line and zone:
+
+   ```bash
+   cd apps/api
+   uv run yardlens-eval bay-3.mp4 --expected 118 --model bay-sacks.pt --classes truck,sack \
+       --cargo sack --line 0.36,0.30,0.46,0.62 --zone "0.2,0.75 1,0.75 1,1 0.2,1"
+   ```
+
+   It prints each session and exits with status 1 when the count is off by more than
+   `--tolerance`. Off by more than one or two sacks per truck means more labelled frames, usually
+   of the cases it missed. Keep these recordings: rerun them after retraining or upgrading.
 
 ## Also open before production
 
-- **Full rate while a session is open.** With a truck parked and nothing moving, a loading-bay
-  camera runs at `STANDBY_FPS` (3 fps, `services/governor.py`), so a first sack that crosses the
-  line within half a second of appearing can be missed. Run at the camera's full rate while a
-  session is open (`Pacer.observe` / `Limits.standby_fps`).
 - **Linux server.** Never run there yet. Hardware video decoding may not be available in the PyPI
   OpenCV build (it falls back to the CPU); the systemd units in `deploy/linux` are untested;
-  OpenVINO on AMD CPUs is untested.
+  OpenVINO on AMD CPUs is untested. CI runs the test suite on Linux, not on real cameras.
 - **24-hour run** with real cameras, watching memory and CPU under **Settings → Нагрузка**.
-- **No authentication.** Put a reverse proxy with a login in front before the dashboard is reachable
-  from outside the local network.
+- **No authentication**, and camera URLs with their passwords are visible in the dashboard. See
+  [roadmap.md](roadmap.md) with the other architecture work not done yet.
 
 ## Demo clips (not in git)
 

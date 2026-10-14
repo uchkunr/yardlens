@@ -46,6 +46,8 @@ class Settings(BaseSettings):
     max_frame_width: int = Field(default=1280, ge=320)
     stream_fps: float = Field(default=15.0, ge=1.0, le=30.0)
     event_retention_days: int = Field(default=7, ge=1)
+    # Photos of loading sessions are kept this long; the sessions themselves stay for good.
+    session_image_retention_days: int = Field(default=365, ge=1)
     # Loading bays: seconds a vehicle stands in the zone before it counts as arrived, and seconds
     # with neither a vehicle nor cargo before it counts as gone.
     loading_arrive_seconds: float = Field(default=15.0, ge=1.0)

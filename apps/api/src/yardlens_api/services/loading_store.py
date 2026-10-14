@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import Select, func, select, update
+from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from yardlens_api.core.enums import SessionStatus
@@ -26,6 +26,18 @@ from yardlens_api.services.plates import format_plate, normalize_plate
 
 # A stored row or a worker's in-memory session; both carry the same fields.
 type SessionRecord = LoadingSession | SessionState
+
+# A session saved this recently when the API stopped is resumed rather than closed: the vehicle is
+# probably still in the bay. Open sessions are saved at least once a minute while it is.
+RESUME_WINDOW = timedelta(minutes=5)
+
+
+@dataclass(frozen=True, slots=True)
+class InterruptedSession:
+    """An open session found at startup, handed to its camera's worker to carry on."""
+
+    state: SessionState
+    last_seen: datetime
 
 
 def to_session_read(
@@ -76,20 +88,60 @@ async def save_session(session: AsyncSession, state: SessionState) -> LoadingSes
         row.plate_confidence = state.plate_confidence
     row.vehicle_snapshot_path = state.vehicle_snapshot_path or row.vehicle_snapshot_path
     row.plate_snapshot_path = state.plate_snapshot_path or row.plate_snapshot_path
+    # Explicit: a heartbeat changes no other column, and it is what marks the vehicle as present.
+    row.updated_at = datetime.now(UTC)
     await session.commit()
     return row
 
 
-async def close_interrupted_sessions(session: AsyncSession) -> int:
-    """Sessions still marked active at startup were cut off by a restart: close them."""
-    result = await session.execute(
-        update(LoadingSession)
-        .where(LoadingSession.status == SessionStatus.ACTIVE.value)
-        .values(status=SessionStatus.COMPLETED.value, departed_at=LoadingSession.updated_at)
+def row_to_state(row: LoadingSession) -> SessionState:
+    return SessionState(
+        id=row.id,
+        camera_id=row.camera_id,
+        arrived_at=row.arrived_at,
+        status=SessionStatus(row.status),
+        departed_at=row.departed_at,
+        loading_started_at=row.loading_started_at,
+        loading_finished_at=row.loading_finished_at,
+        loaded=row.loaded,
+        unloaded=row.unloaded,
+        vehicle_class=row.vehicle_class,
+        plate=row.plate,
+        plate_confidence=row.plate_confidence,
+        vehicle_snapshot_path=row.vehicle_snapshot_path,
+        plate_snapshot_path=row.plate_snapshot_path,
     )
+
+
+async def take_interrupted_sessions(
+    session: AsyncSession, *, running_cameras: set[int], now: datetime | None = None
+) -> tuple[dict[int, InterruptedSession], int]:
+    """Sessions still open at startup were cut off by a restart. The newest one per running
+    camera, if saved within ``RESUME_WINDOW``, is returned to be resumed; the rest are closed as
+    of their last save. Returns the resumable sessions by camera and how many were closed."""
+    now = now or datetime.now(UTC)
+    rows = (
+        await session.scalars(
+            select(LoadingSession)
+            .where(LoadingSession.status == SessionStatus.ACTIVE.value)
+            .order_by(LoadingSession.updated_at.desc())
+        )
+    ).all()
+    resumable: dict[int, InterruptedSession] = {}
+    closed = 0
+    for row in rows:
+        if (
+            row.camera_id in running_cameras
+            and row.camera_id not in resumable
+            and now - row.updated_at <= RESUME_WINDOW
+        ):
+            resumable[row.camera_id] = InterruptedSession(row_to_state(row), row.updated_at)
+            continue
+        row.status = SessionStatus.COMPLETED.value
+        row.departed_at = max(row.updated_at, row.arrived_at)
+        closed += 1
     await session.commit()
-    closed: int = getattr(result, "rowcount", 0) or 0
-    return closed
+    return resumable, closed
 
 
 @dataclass(frozen=True, slots=True)
@@ -219,6 +271,27 @@ async def summary(
         active=[row_to_read(row, name) for row, name in active_rows],
         daily=daily,
     )
+
+
+async def purge_session_images_before(session: AsyncSession, cutoff: datetime) -> list[str]:
+    """Forget the photos of sessions that arrived before ``cutoff``; the sessions stay. Returns
+    the files to delete."""
+    rows = (
+        await session.scalars(
+            select(LoadingSession).where(
+                LoadingSession.arrived_at < cutoff,
+                (LoadingSession.vehicle_snapshot_path.is_not(None))
+                | (LoadingSession.plate_snapshot_path.is_not(None)),
+            )
+        )
+    ).all()
+    paths: list[str] = []
+    for row in rows:
+        paths += [path for path in (row.vehicle_snapshot_path, row.plate_snapshot_path) if path]
+        row.vehicle_snapshot_path = None
+        row.plate_snapshot_path = None
+    await session.commit()
+    return paths
 
 
 async def session_snapshot_paths(session: AsyncSession, camera_id: int) -> list[str]:

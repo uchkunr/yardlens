@@ -73,6 +73,8 @@ class Limits:
     idle_fps: float = 1.0
     stream_fps: float = 15.0
     jpeg_quality: int = 80
+    save_images: bool = True
+    """False while the disk is nearly full: counting goes on, snapshots wait."""
 
     def active_fps(self, max_fps: float) -> float:
         return max(min(max_fps, MIN_COUNTING_FPS), max_fps * self.fps_scale)

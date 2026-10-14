@@ -7,13 +7,15 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from tests.conftest import make_detections
+from tests.conftest import FakeDetector, make_detections
 from yardlens_api.core.enums import Activity
 from yardlens_api.schemas.camera import CountingLine, LoadingZone, ZonePoint
+from yardlens_api.schemas.settings import CameraDetection, DetectionSettings, effective_detection
 from yardlens_api.services.analyzer import FrameAnalyzer
 from yardlens_api.services.detector import (
     Backend,
     InferencePlan,
+    ModelPool,
     openvino_dir,
     openvino_ready,
     plan_inference,
@@ -267,3 +269,38 @@ def test_plate_stream_opens_on_demand_and_closes_when_no_longer_wanted() -> None
         assert stream.latest() is None
     finally:
         stream.stop()
+
+
+# -- per-camera detection -----------------------------------------------------------------------
+
+
+def test_a_camera_overrides_only_what_it_sets() -> None:
+    general = DetectionSettings(
+        model="yolo26n.pt",
+        confidence=0.35,
+        classes=["truck", "person", "suitcase"],
+        cargo_classes=["suitcase"],
+    )
+    assert effective_detection(general, None) is general
+    own = effective_detection(general, CameraDetection(model="bay-sacks.pt", classes=["truck"]))
+    assert own.model == "bay-sacks.pt"
+    assert own.confidence == 0.35
+    assert own.classes == ["truck"]
+    assert own.cargo_classes == [], "inherited cargo stays within the camera's classes"
+    assert effective_detection(general, CameraDetection(confidence=0.6)).confidence == 0.6
+
+
+def test_model_pool_loads_once_and_unloads_what_is_no_longer_used() -> None:
+    loads: list[str] = []
+
+    def load(name: str) -> FakeDetector:
+        loads.append(name)
+        return FakeDetector()
+
+    pool = ModelPool(load)
+    first = pool.get("bay-sacks.pt")
+    assert pool.get("bay-sacks.pt") is first
+    pool.get("gate.pt")
+    assert loads == ["bay-sacks.pt", "gate.pt"]
+    pool.retain({"gate.pt"})
+    assert pool.models == ["gate.pt"]

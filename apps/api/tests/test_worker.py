@@ -5,7 +5,7 @@ from pathlib import Path
 from tests.conftest import FakeDetector, make_detections, write_test_video
 from yardlens_api.core.enums import Activity, CameraStatus, SourceType
 from yardlens_api.schemas.camera import CountingLine, LoadingZone, ZonePoint
-from yardlens_api.schemas.settings import DetectionSettings
+from yardlens_api.schemas.settings import CameraDetection, DetectionSettings
 from yardlens_api.services.camera_worker import (
     CameraConfig,
     CameraWorker,
@@ -131,3 +131,30 @@ def test_idle_cameras_slow_down(tmp_path: Path) -> None:
     finally:
         worker.stop()
         worker.join(5.0)
+
+
+def test_a_camera_detects_its_own_classes(tmp_path: Path) -> None:
+    clip = write_test_video(tmp_path / "clip.mp4")
+    detector = FakeDetector()
+    worker = CameraWorker(
+        CameraConfig(
+            id=1,
+            name="Bay",
+            source_type=SourceType.FILE,
+            url=str(clip),
+            inference_fps=10.0,
+            line=None,
+            detection=CameraDetection(classes=["truck"]),
+        ),
+        detector=detector,
+        detection_settings=DetectionSettings,
+        listener=_NullListener(),
+        options=WorkerOptions(snapshots_dir=tmp_path / "snapshots", base_dir=tmp_path),
+    )
+    worker.start()
+    try:
+        _wait_until(lambda: detector.calls >= 2)
+    finally:
+        worker.stop()
+        worker.join(5.0)
+    assert detector.classes[0] == ["truck"]

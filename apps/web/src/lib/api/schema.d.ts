@@ -345,6 +345,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/models/{model}/classes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Model Classes
+         * @description The classes a model detects, for picking a camera's own classes. Loads it if needed.
+         */
+        get: operations["model_classes_api_settings_models__model__classes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/telegram/test": {
         parameters: {
             query?: never;
@@ -409,6 +429,24 @@ export interface components {
              * @description High-resolution main stream (RTSP), opened only to read number plates while `url` is the camera's light sub-stream
              */
             plate_url?: string | null;
+            detection?: components["schemas"]["CameraDetection"] | null;
+        };
+        /**
+         * CameraDetection
+         * @description A camera's own detection settings. Fields left out (null) follow the general settings.
+         */
+        CameraDetection: {
+            /**
+             * Model
+             * @description A model of its own, e.g. one trained for this loading bay
+             */
+            model?: string | null;
+            /** Confidence */
+            confidence?: number | null;
+            /** Classes */
+            classes?: string[] | null;
+            /** Cargo Classes */
+            cargo_classes?: string[] | null;
         };
         /** CameraLoad */
         CameraLoad: {
@@ -443,6 +481,7 @@ export interface components {
             zone: components["schemas"]["LoadingZone"] | null;
             /** Plate Url */
             plate_url: string | null;
+            detection: components["schemas"]["CameraDetection"] | null;
             /**
              * Created At
              * Format: date-time
@@ -568,6 +607,8 @@ export interface components {
              * @description High-resolution main stream (RTSP), opened only to read number plates while `url` is the camera's light sub-stream
              */
             plate_url?: string | null;
+            /** @description The camera's own detection settings; null follows the general */
+            detection?: components["schemas"]["CameraDetection"] | null;
         };
         /** ClassCount */
         ClassCount: {
@@ -647,6 +688,23 @@ export interface components {
             device: string;
             /** Loaded */
             loaded: boolean;
+        };
+        /**
+         * DiskInfo
+         * @description The disk holding the data directory (snapshots, models, videos).
+         */
+        DiskInfo: {
+            /** Percent */
+            percent: number;
+            /** Free Bytes */
+            free_bytes: number;
+            /** Total Bytes */
+            total_bytes: number;
+            /**
+             * Images Paused
+             * @description Snapshots are not saved: too little free space
+             */
+            images_paused: boolean;
         };
         /** EventPage */
         EventPage: {
@@ -768,6 +826,11 @@ export interface components {
              * @description Share of time the detector spends on inference
              */
             busy_percent: number;
+            /**
+             * Models
+             * @description Every model loaded: the general one first
+             */
+            models: string[];
         };
         /** LoadInfo */
         LoadInfo: {
@@ -1036,6 +1099,8 @@ export interface components {
             sampled_at: string | null;
             cpu: components["schemas"]["CpuInfo"];
             memory: components["schemas"]["MemoryInfo"];
+            /** @description None until the first sample */
+            disk: components["schemas"]["DiskInfo"] | null;
             gpu: components["schemas"]["GpuInfo"] | null;
             inference: components["schemas"]["InferenceInfo"];
             load: components["schemas"]["LoadInfo"];
@@ -1820,6 +1885,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SettingsRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    model_classes_api_settings_models__model__classes_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                model: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": string[];
                 };
             };
             /** @description Validation Error */

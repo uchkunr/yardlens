@@ -17,7 +17,8 @@ import threading
 import time
 from collections import deque
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Any, cast
 
 import cv2
@@ -36,6 +37,9 @@ logger = logging.getLogger(__name__)
 
 SAMPLE_INTERVAL_SECONDS = 2.0
 HISTORY_SAMPLES = 90  # three minutes
+# Below this much free space snapshots are no longer written, so the database keeps room to work.
+DISK_RESERVE_BYTES = 2 * 1024**3
+DISK_WARNING_PERCENT = 90.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,6 +140,9 @@ class MachineReading:
     gpu_percent: float | None = None
     gpu_memory_used: int | None = None
     gpu_memory_total: int | None = None
+    disk_percent: float = 0.0
+    disk_free: int = 0
+    disk_total: int = 0
 
 
 class ResourceMonitor:
@@ -146,10 +153,12 @@ class ResourceMonitor:
         budget: Callable[[], Budget],
         detector_busy_seconds: Callable[[], float],
         inference_on_gpu: Callable[[], bool],
+        data_dir: Path,
         gpu: GpuProbe | None = None,
         interval: float = SAMPLE_INTERVAL_SECONDS,
     ) -> None:
         self.plan = plan
+        self.data_dir = data_dir
         self._budget = budget
         self._busy_seconds = detector_busy_seconds
         self._inference_on_gpu = inference_on_gpu
@@ -180,7 +189,10 @@ class ResourceMonitor:
 
     def refresh(self) -> None:
         """Re-apply the budget now (after the settings changed) rather than at the next sample."""
-        self._limits = limits_for(self._governor.level, self._budget())
+        self._limits = replace(
+            limits_for(self._governor.level, self._budget()),
+            save_images=self._limits.save_images,
+        )
 
     def latest(self) -> MachineReading | None:
         with self._lock:
@@ -209,7 +221,16 @@ class ResourceMonitor:
                 )
                 previous = self._governor.level
                 level = self._governor.update(sample, budget.cpu_limit_percent)
-                self._limits = limits_for(level, budget)
+                save_images = reading.disk_total == 0 or reading.disk_free >= DISK_RESERVE_BYTES
+                if save_images != self._limits.save_images:
+                    log = logger.info if save_images else logger.error
+                    log(
+                        "Snapshots resumed"
+                        if save_images
+                        else "Disk nearly full; snapshots paused",
+                        extra={"free_bytes": reading.disk_free, "path": str(self.data_dir)},
+                    )
+                self._limits = replace(limits_for(level, budget), save_images=save_images)
                 with self._lock:
                     self._history.append(reading)
                 if level != previous:
@@ -229,6 +250,15 @@ class ResourceMonitor:
         memory = psutil.virtual_memory()
         process_cpu = self._process.cpu_percent(None) / max(1, self.plan.logical_cpus)
         gpu = self.gpu.read()
+        try:
+            disk = psutil.disk_usage(str(self.data_dir))
+            disk_percent, disk_free, disk_total = (
+                float(disk.percent),
+                int(disk.free),
+                int(disk.total),
+            )
+        except OSError:
+            disk_percent, disk_free, disk_total = 0.0, 0, 0
         return MachineReading(
             at=now,
             cpu_percent=psutil.cpu_percent(None),
@@ -241,4 +271,7 @@ class ResourceMonitor:
             gpu_percent=gpu[0] if gpu else None,
             gpu_memory_used=gpu[1] if gpu else None,
             gpu_memory_total=gpu[2] if gpu else None,
+            disk_percent=disk_percent,
+            disk_free=disk_free,
+            disk_total=disk_total,
         )

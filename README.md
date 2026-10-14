@@ -97,6 +97,12 @@ so every worker goes through a single lazily loaded model behind a lock. Memory 
 behaviour stays predictable; the cost is throughput (see [Limitations](#limitations)). How the
 machine's cores are shared out is described in [Performance and load](#performance-and-load).
 
+**An outage costs nothing.** If PostgreSQL is briefly unreachable, events and loading sessions wait
+in memory and are retried with backoff (1 s doubling to 30 s) until they are saved; for a session
+only its latest state is kept, since every update carries the whole of it. Rows the database
+refuses outright, such as an event for a camera deleted a moment earlier, are dropped one at a
+time, so they never hold the others back.
+
 **Events, not detections.** Workers never persist per-frame detections. They emit five event types:
 `object_entered`, `line_crossed_in`, `line_crossed_out`, `camera_online` and `camera_offline`. A
 track only counts once ByteTrack has confirmed it with two consecutive matches, and a line crossing is
@@ -170,7 +176,9 @@ To set a camera up as a loading bay:
 2. **Counting line**: draw it across the conveyor where the sacks go into the vehicle, with the
    green arrow pointing into the vehicle. That direction counts as loaded, the other as unloaded.
 3. **Loading zone**: click the corners of the spot where the vehicle stands while it is loaded.
-4. **Settings → Detection**: pick the model, and under **What counts as cargo** the sack class.
+4. **Detection**: in the camera's menu, give it settings of its own (a model trained for the bay,
+   its classes, and under **What counts as cargo** the sack class), so other cameras keep theirs.
+   Settings left unset there follow **Settings → Detection**.
 
 How a session runs:
 
@@ -179,6 +187,10 @@ How a session runs:
 - Every cargo item crossing the line is added to it. Cargo is not reported as one event per item.
 - It closes after 60 s with neither a vehicle nor cargo in sight, so a worker walking in front of the
   truck or a break in loading doesn't split it.
+- While a vehicle is in the bay the camera analyses at its full rate, and the session is saved at
+  least once a minute. If the API restarts meanwhile (an update, a crash) the session is picked up
+  again rather than split in two; if the vehicle turns out to be gone, it closes as of the last
+  time it was seen.
 - The plate is read twice a second from the full-resolution frame while the vehicle is parked, with
   [fast-alpr](https://github.com/ankandrew/fast-alpr) (a YOLOv9 plate detector and an OCR model,
   ONNX on the CPU, downloaded on first use). Readings are pooled, readings in an Uzbek format
@@ -186,13 +198,15 @@ How a session runs:
   fixed by hand in the dashboard is never overwritten.
 - Telegram can report *vehicle arrived* and *loading completed* (plate, count, time in the bay).
   These are one per vehicle, so they skip the rate limit.
-- Sessions are kept for good; event retention doesn't touch them.
+- Sessions are kept for good; event retention doesn't touch them. Their photos are kept for a year
+  (`YARDLENS_SESSION_IMAGE_RETENTION_DAYS`).
 
-**Sacks need a model of their own.** COCO has no sack class. Record footage from the bay, label a few
-hundred frames with two classes, `truck` and `sack` (in CVAT or Label Studio, say), and train a YOLO
-model on it (`yolo train data=bay.yaml model=yolo26n.pt`; about an hour on a GPU). Put the resulting
-`.pt` file into `apps/api/data/models` and it appears under **Settings → Detection**. Keep the name
-`truck` for the vehicle class: that is how YardLens knows a vehicle from cargo.
+**Sacks need a model of their own.** COCO has no sack class, and zero-shot detectors were tried and
+did not find sacks on a moving conveyor. Record footage from the bay, label a few hundred frames
+with two classes, `truck` and `sack`, train a YOLO model on it, and check its count against loadings
+counted by hand with `uv run yardlens-eval`. The full procedure is in
+[docs/sack-model.md](docs/sack-model.md). Keep the name `truck` for the vehicle class: that is how
+YardLens knows a vehicle from cargo.
 ## Performance and load
 
 The goal is a server that never chokes: cameras get the CPU they need while something happens, give
@@ -213,9 +227,9 @@ Measured with `bun run bench` on the sample 4K clip, on an i7-14700K:
 ### What keeps it down
 
 - **Inference follows activity.** A camera runs at its configured rate while something moves,
-  appears or crosses the line, and for 8 s after. With a vehicle parked in a loading bay and nothing
-  else moving it runs at 3 fps, and with nothing moving at all at 1 fps (**Settings → Load**). A
-  still scene needs one frame a second to notice that something changed.
+  appears or crosses the line, for 8 s after, and for as long as a vehicle is being loaded. A vehicle
+  that has just parked is watched at 3 fps until its session opens, and a scene where nothing moves
+  at 1 fps (**Settings → Load**): enough to notice that something changed.
 - **Only frames in use are converted.** Capture keeps up with the stream, but converts a frame to an
   image only when inference or a viewer is due one. On the 4K clip this halves the cost of an idle
   camera; with GPU decoding as well it falls to about a fifth.
@@ -237,6 +251,9 @@ Measured with `bun run bench` on the sample 4K clip, on an i7-14700K:
   a six-core machine gives inference 2 threads. `YARDLENS_INFERENCE_THREADS` overrides it.
 - **Below-normal priority.** The operating system, PostgreSQL and the dashboard stay responsive
   even when the cameras keep the CPU busy.
+- **Disk.** The monitor also watches the disk holding the data directory. With less than 2 GB free,
+  snapshots stop being written (counting goes on) until space is freed, and **Settings → Load**
+  says so.
 
 ### The governor
 
@@ -293,7 +310,7 @@ Everything lives under `/api`. The full schema is at `/docs`.
 | `GET /api/system/resources` | CPU, memory and GPU load, the governor's level and each camera's current rate |
 | `GET, POST /api/cameras` | List and create cameras |
 | `POST /api/cameras/test` | Grab one frame from a source without saving it |
-| `GET, PATCH, DELETE /api/cameras/{id}` | Read, update (the running worker picks up the change), delete |
+| `GET, PATCH, DELETE /api/cameras/{id}` | Read, update (the running worker picks up the change, including its own `detection` settings), delete |
 | `POST /api/cameras/{id}/enable`, `/disable` | Start or stop a camera |
 | `GET /api/cameras/{id}/stream.mjpeg` | Annotated live stream |
 | `GET /api/cameras/{id}/snapshot.jpg` | Latest annotated frame; `?raw=true` for the clean one |
@@ -306,6 +323,7 @@ Everything lives under `/api`. The full schema is at `/docs`.
 | `GET /api/loading/sessions/export` | The same history as an Excel file |
 | `GET, PATCH /api/loading/sessions/{id}` | One loading session; `PATCH` fixes its plate by hand |
 | `GET, PUT /api/settings` | Detection, Telegram and performance settings |
+| `GET /api/settings/models/{model}/classes` | The classes a model detects, for a camera's own settings |
 | `POST /api/settings/telegram/test` | Send a test message |
 
 Event snapshots are served as static files from `/media/snapshots/`.
@@ -340,6 +358,7 @@ cp apps/web/.env.example apps/web/.env.local
 | `YARDLENS_MAX_FRAME_WIDTH` | `1280` | Wider frames are downscaled before inference and streaming |
 | `YARDLENS_SNAPSHOT_MAX_WIDTH` | `960` | Width of event snapshots |
 | `YARDLENS_EVENT_RETENTION_DAYS` | `7` | Older events and their snapshots are purged hourly |
+| `YARDLENS_SESSION_IMAGE_RETENTION_DAYS` | `365` | Photos of older loading sessions are deleted; the sessions stay |
 | `YARDLENS_LOADING_ARRIVE_SECONDS` | `15` | How long a vehicle stands in a loading zone before it counts as arrived |
 | `YARDLENS_LOADING_DEPART_SECONDS` | `60` | How long a bay stays quiet before the vehicle counts as gone |
 
@@ -365,6 +384,7 @@ server-side.
 | `bun run format` | Ruff fix and format |
 | `bun run gen:api` | Regenerate `apps/web/src/lib/api/schema.d.ts` from the running API |
 | `bun run bench [video]` | Measure what a camera costs on this machine (see [Sizing a server](#sizing-a-server)) |
+| `uv run yardlens-eval video …` | Count a recording offline and compare with a known count (in `apps/api`) |
 | `bun run start` | Production build of the dashboard and the API without reloading |
 
 Nx caches lint, typecheck and test. The API tests need neither Postgres nor model weights: they run
@@ -379,6 +399,7 @@ apps/
 │   ├── src/yardlens_api/
 │   │   ├── main.py               app factory, lifespan, retention task
 │   │   ├── bench.py              `yardlens-bench`: cost of a camera on this machine
+│   │   ├── evaluate.py           `yardlens-eval`: count a recording, compare with a known count
 │   │   ├── api/routes/           health, system, cameras, streams, events, stats, loading, settings
 │   │   ├── core/                 settings (YARDLENS_*), logging, errors
 │   │   ├── db/, schemas/         SQLAlchemy models, Pydantic v2 schemas
@@ -404,6 +425,7 @@ apps/
         ├── i18n/                 Russian (default) and English copy, formatting
         └── lib/api/              client and types generated from OpenAPI
 deploy/                           systemd units (Linux), startup tasks (Windows)
+docs/                             sack model plan, roadmap of the architecture work left
 ```
 
 ## Limitations

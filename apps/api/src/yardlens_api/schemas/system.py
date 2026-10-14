@@ -27,6 +27,15 @@ class GpuInfo(BaseModel):
     memory_total_bytes: int | None
 
 
+class DiskInfo(BaseModel):
+    """The disk holding the data directory (snapshots, models, videos)."""
+
+    percent: float
+    free_bytes: int
+    total_bytes: int
+    images_paused: bool = Field(description="Snapshots are not saved: too little free space")
+
+
 class InferenceInfo(BaseModel):
     model: str
     backend: str = Field(description="pytorch or openvino")
@@ -34,6 +43,7 @@ class InferenceInfo(BaseModel):
     threads: int | None
     optimizing: bool = Field(description="An OpenVINO copy of the model is being prepared")
     busy_percent: float = Field(description="Share of time the detector spends on inference")
+    models: list[str] = Field(description="Every model loaded: the general one first")
 
 
 class LoadInfo(BaseModel):
@@ -67,6 +77,7 @@ class SystemResources(BaseModel):
     sampled_at: datetime | None = Field(description="None until the first sample (2 s)")
     cpu: CpuInfo
     memory: MemoryInfo
+    disk: DiskInfo | None = Field(description="None until the first sample")
     gpu: GpuInfo | None
     inference: InferenceInfo
     load: LoadInfo

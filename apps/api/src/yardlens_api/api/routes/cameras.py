@@ -21,7 +21,9 @@ from yardlens_api.schemas.camera import (
     CountingLine,
     LoadingZone,
 )
+from yardlens_api.schemas.settings import CameraDetection, detection_problem, effective_detection
 from yardlens_api.services.camera_worker import CameraConfig, encode_jpeg
+from yardlens_api.services.detector import available_models
 from yardlens_api.services.events import delete_snapshots_for_camera, remove_snapshot_files
 from yardlens_api.services.loading_store import session_snapshot_paths, to_session_read
 from yardlens_api.services.sources import open_reader, resolve_source, validate_source
@@ -35,6 +37,10 @@ class InvalidSourceError(AppError):
     status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
 
 
+def _own_detection(camera: Camera) -> CameraDetection | None:
+    return CameraDetection.model_validate(camera.detection) if camera.detection else None
+
+
 def camera_config(camera: Camera) -> CameraConfig:
     return CameraConfig(
         id=camera.id,
@@ -45,7 +51,35 @@ def camera_config(camera: Camera) -> CameraConfig:
         line=CountingLine.model_validate(camera.line) if camera.line else None,
         zone=LoadingZone.model_validate(camera.zone) if camera.zone else None,
         plate_url=camera.plate_url,
+        detection=_own_detection(camera),
     )
+
+
+def _sync(container: Container, camera: Camera) -> None:
+    """Start, update or stop the camera's worker, then drop models no camera needs any more."""
+    container.cameras.sync(camera_config(camera), enabled=camera.enabled)
+    general = container.settings_store.detection().model
+    container.models.retain(container.cameras.models_in_use() - {general})
+
+
+async def _validate_detection(container: Container, own: CameraDetection | None) -> None:
+    """The camera's own settings must work with its model: known classes, cargo among them."""
+    if own is None:
+        return
+    settings = effective_detection(container.settings_store.detection(), own)
+    if own.model is not None and own.model not in available_models(container.settings.models_dir):
+        raise InvalidSourceError(f"Unsupported model '{own.model}'")
+    if settings.model == container.detector.status.model:
+        names = container.detector.class_names
+    else:
+        try:
+            names = (await asyncio.to_thread(container.models.get, settings.model)).class_names
+        except Exception as exc:
+            logger.exception("Model load failed", extra={"model": settings.model})
+            raise InvalidSourceError(f"Could not load model: {exc}") from exc
+    problem = detection_problem(settings, names)
+    if problem is not None:
+        raise InvalidSourceError(problem)
 
 
 def to_camera_read(camera: Camera, container: Container) -> CameraRead:
@@ -60,6 +94,7 @@ def to_camera_read(camera: Camera, container: Container) -> CameraRead:
         line=CountingLine.model_validate(camera.line) if camera.line else None,
         zone=LoadingZone.model_validate(camera.zone) if camera.zone else None,
         plate_url=camera.plate_url,
+        detection=_own_detection(camera),
         created_at=camera.created_at,
         updated_at=camera.updated_at,
         runtime=CameraRuntime(
@@ -126,6 +161,7 @@ async def create_camera(
 ) -> CameraRead:
     _validate(container, payload.source_type, payload.url)
     plate_url = _validate_plate_url(payload.plate_url)
+    await _validate_detection(container, payload.detection)
     camera = Camera(
         name=payload.name,
         source_type=payload.source_type.value,
@@ -135,11 +171,12 @@ async def create_camera(
         line=payload.line.model_dump() if payload.line else None,
         zone=payload.zone.model_dump() if payload.zone else None,
         plate_url=plate_url,
+        detection=payload.detection.model_dump(exclude_none=True) if payload.detection else None,
     )
     session.add(camera)
     await _commit(session)
     await session.refresh(camera)
-    container.cameras.sync(camera_config(camera), enabled=camera.enabled)
+    _sync(container, camera)
     return to_camera_read(camera, container)
 
 
@@ -233,10 +270,15 @@ async def update_camera(
         camera.zone = payload.zone.model_dump() if payload.zone else None
     if "plate_url" in changes:
         camera.plate_url = _validate_plate_url(payload.plate_url)
+    if "detection" in changes:
+        await _validate_detection(container, payload.detection)
+        camera.detection = (
+            payload.detection.model_dump(exclude_none=True) if payload.detection else None
+        )
 
     await _commit(session)
     await session.refresh(camera)
-    container.cameras.sync(camera_config(camera), enabled=camera.enabled)
+    _sync(container, camera)
     return to_camera_read(camera, container)
 
 
@@ -259,7 +301,7 @@ async def _set_enabled(
     camera.enabled = enabled
     await session.commit()
     await session.refresh(camera)
-    container.cameras.sync(camera_config(camera), enabled=enabled)
+    _sync(container, camera)
     return to_camera_read(camera, container)
 
 

@@ -32,7 +32,7 @@ function detectionSchema(t: Messages) {
 
 type DetectionValues = z.infer<ReturnType<typeof detectionSchema>>;
 
-function ClassPicker({
+export function ClassPicker({
   id,
   placeholder,
   value,

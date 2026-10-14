@@ -47,6 +47,7 @@ class FakeDetector:
         self.calls = 0
         self.model = "yolo26n.pt"
         self.sizes: list[int | None] = []
+        self.classes: list[list[str]] = []
 
     @property
     def status(self) -> DetectorStatus:
@@ -73,6 +74,7 @@ class FakeDetector:
     ) -> sv.Detections:
         self.calls += 1
         self.sizes.append(imgsz)
+        self.classes.append(list(classes))
         return self._script(self.calls)
 
 

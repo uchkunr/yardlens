@@ -8,6 +8,11 @@ A session opens once a vehicle has stood in the zone for ``arrive_after`` second
 cargo is counted with no vehicle seen yet, so no cargo is ever lost. It closes once neither a
 vehicle nor cargo has been seen for ``depart_after`` seconds. Both delays ride out the everyday
 gaps: a worker walking in front of the truck, a break in loading.
+
+While a vehicle stands in the bay the session is reported at least every ``HEARTBEAT_SECONDS``,
+so the database knows it is still there. After a restart a recent session is ``resume``d rather
+than closed: if the vehicle is seen again it carries on, counts and all; if not, it closes as of
+the last moment it was known to be there.
 """
 
 import uuid
@@ -24,6 +29,7 @@ from yardlens_api.services.plates import Frame, PlateRead, PlateVotes
 # A vehicle hidden for less than this (someone walking past) is still the same visit.
 PRESENCE_GAP_SECONDS = 5.0
 PLATE_READ_INTERVAL_SECONDS = 0.5
+HEARTBEAT_SECONDS = 60.0
 
 
 class SessionChange(StrEnum):
@@ -99,6 +105,9 @@ class LoadingTracker:
         self._parked_now = False
         self._votes = PlateVotes()
         self._last_plate_attempt = float("-inf")
+        self._last_report = float("-inf")
+        # Set while a resumed session has not been confirmed by seeing the vehicle or cargo.
+        self._resumed_last_seen: datetime | None = None
 
     @property
     def session(self) -> SessionState | None:
@@ -135,6 +144,8 @@ class LoadingTracker:
             return now - timedelta(seconds=t - moment)
 
         self._parked_now = bool(parked)
+        if parked or loaded or unloaded:
+            self._resumed_last_seen = None
         vehicle = largest(parked)
         if vehicle is not None:
             if self._last_vehicle_at is None or t - self._last_vehicle_at > PRESENCE_GAP_SECONDS:
@@ -191,8 +202,30 @@ class LoadingTracker:
             default=t,
         )
         if t - last_activity >= self._depart_after:
-            return self._close(wall(last_activity))
-        return SessionUpdate(change, replace(session)) if change else None
+            return self._close(self._resumed_last_seen or wall(last_activity))
+        if change is None and vehicle is not None and t - self._last_report >= HEARTBEAT_SECONDS:
+            change = SessionChange.UPDATED
+        if change is None:
+            return None
+        self._last_report = t
+        return SessionUpdate(change, replace(session))
+
+    @property
+    def session_open(self) -> bool:
+        return self._session is not None
+
+    def resume(self, state: SessionState, *, t: float, last_seen: datetime) -> None:
+        """Carry on with a session cut off by a restart (monotonic time ``t`` is now).
+
+        The departure timer starts now. Until the vehicle or cargo shows up again, a closing
+        session is dated ``last_seen``, the last time it was known to be in the bay.
+        """
+        self._session = replace(state)
+        self._presence_since = t - self._arrive_after
+        self._last_vehicle_at = t
+        self._last_cargo_at = None
+        self._last_report = t
+        self._resumed_last_seen = last_seen
 
     @property
     def occupied(self) -> bool:
@@ -243,7 +276,9 @@ class LoadingTracker:
             ),
             default=t,
         )
-        return self._close(now - timedelta(seconds=max(0.0, t - last_activity)))
+        return self._close(
+            self._resumed_last_seen or now - timedelta(seconds=max(0.0, t - last_activity))
+        )
 
     def _close(self, departed_at: datetime) -> SessionUpdate | None:
         session = self._session
@@ -256,6 +291,7 @@ class LoadingTracker:
         self._last_vehicle_at = None
         self._last_cargo_at = None
         self._votes = PlateVotes()
+        self._resumed_last_seen = None
         return SessionUpdate(SessionChange.CLOSED, replace(session))
 
     def _apply_plate(self, session: SessionState) -> None:

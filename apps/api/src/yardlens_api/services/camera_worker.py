@@ -43,7 +43,7 @@ from yardlens_api.core.enums import (
 )
 from yardlens_api.core.errors import SourceError
 from yardlens_api.schemas.camera import CountingLine, LoadingZone
-from yardlens_api.schemas.settings import DetectionSettings
+from yardlens_api.schemas.settings import CameraDetection, DetectionSettings, effective_detection
 from yardlens_api.services.analyzer import Box, FrameAnalyzer, Observation, TrackedObject, highlight
 from yardlens_api.services.detector import Detector
 from yardlens_api.services.governor import Limits
@@ -54,6 +54,7 @@ from yardlens_api.services.loading import (
     SessionUpdate,
     largest,
 )
+from yardlens_api.services.loading_store import InterruptedSession
 from yardlens_api.services.pacing import (
     ACTIVE_HOLD_SECONDS,
     Pacer,
@@ -87,6 +88,8 @@ class CameraConfig:
     zone: LoadingZone | None = None
     plate_url: str | None = None
     """The camera's high-resolution main stream, opened only to read plates."""
+    detection: CameraDetection | None = None
+    """Its own detection settings, over the general ones."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -187,9 +190,13 @@ class CameraWorker:
         options: WorkerOptions,
         plate_reader: PlateReader | None = None,
         limits: Callable[[], Limits] | None = None,
+        resume: InterruptedSession | None = None,
+        detector_for: Callable[[str], Detector] | None = None,
     ) -> None:
         self.config = config
         self._detector = detector
+        # Cameras with a model of their own take its detector from here (a shared pool).
+        self._detector_for = detector_for
         self._detection_settings = detection_settings
         self._listener = listener
         self._options = options
@@ -232,6 +239,12 @@ class CameraWorker:
 
         self._analyzer = FrameAnalyzer(fps=config.inference_fps, line=config.line, zone=config.zone)
         self._loading = self._new_tracker(config.zone)
+        if self._loading is not None and resume is not None:
+            self._loading.resume(resume.state, t=time.monotonic(), last_seen=resume.last_seen)
+            logger.info(
+                "Resumed a loading session cut off by a restart",
+                extra={"camera_id": config.id, "session_id": resume.state.id},
+            )
         self._pacer = Pacer(config.inference_fps, hold_seconds=options.active_hold_seconds)
         self._region: Region | None = analysis_region(config.line, config.zone)
         self._plate_stream = self._new_plate_stream(config)
@@ -569,11 +582,18 @@ class CameraWorker:
         with self._state_lock:
             self._visible = {}
 
+    def settings(self) -> DetectionSettings:
+        """The detection settings this camera uses: its own over the general ones."""
+        return effective_detection(self._detection_settings(), self.config.detection)
+
     def _process(self, frame: Frame, frame_time: float, raw: Frame | None = None) -> None:
-        settings = self._detection_settings()
+        settings = self.settings()
+        detector = self._detector
+        if self._detector_for is not None and settings.model != detector.status.model:
+            detector = self._detector_for(settings.model)
         region = self._region
         crop, (left, top) = crop_region(frame, region)
-        detections = self._detector.detect(
+        detections = detector.detect(
             crop,
             confidence=settings.confidence,
             classes=settings.classes,
@@ -586,9 +606,11 @@ class CameraWorker:
             observation = self._analyzer.process(frame, detections, frame_time)
             self._visible = observation.visible
             tracker = self._loading
+            # While a vehicle is being loaded the camera stays at full rate, so the first sack
+            # after a pause is not missed; standby covers the wait before a session opens.
             self._pacer.observe(
                 frame_time,
-                moving=observation.moving,
+                moving=observation.moving or (tracker is not None and tracker.session_open),
                 standby=tracker is not None and tracker.occupied,
             )
         cargo = frozenset(settings.cargo_classes) if tracker is not None else frozenset[str]()
@@ -805,7 +827,10 @@ class CameraWorker:
         return self._write_image(relative, frame)
 
     def _write_image(self, relative: Path, frame: Frame, *, resize: bool = True) -> str | None:
-        """Save a JPEG under the snapshots directory; returns its path relative to it."""
+        """Save a JPEG under the snapshots directory; returns its path relative to it, or
+        ``None`` when it could not be saved or the disk is nearly full."""
+        if not self._limits().save_images:
+            return None
         width = self._options.snapshot_max_width if resize else None
         target = self._options.snapshots_dir / relative
         try:
@@ -818,7 +843,7 @@ class CameraWorker:
 
     def _copy_for_event(self, session_path: str | None) -> str | None:
         """Events get their own copy: event retention deletes it, the session keeps the original."""
-        if session_path is None:
+        if session_path is None or not self._limits().save_images:
             return None
         now = datetime.now(UTC)
         relative = Path(

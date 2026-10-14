@@ -40,12 +40,19 @@ from yardlens_api.db.models import Camera
 from yardlens_api.db.session import create_engine, create_session_factory, init_models
 from yardlens_api.services.camera_manager import CameraManager
 from yardlens_api.services.camera_worker import WorkerOptions
-from yardlens_api.services.detector import Detector, YoloDetector
+from yardlens_api.services.detector import Detector, ModelPool, YoloDetector
 from yardlens_api.services.event_bus import EventBus
 from yardlens_api.services.event_recorder import EventRecorder
-from yardlens_api.services.events import SNAPSHOTS_URL_PREFIX, purge_events_before
+from yardlens_api.services.events import (
+    SNAPSHOTS_URL_PREFIX,
+    purge_events_before,
+    remove_snapshot_files,
+)
 from yardlens_api.services.governor import Budget
-from yardlens_api.services.loading_store import close_interrupted_sessions
+from yardlens_api.services.loading_store import (
+    purge_session_images_before,
+    take_interrupted_sessions,
+)
 from yardlens_api.services.notifier import TelegramNotifier
 from yardlens_api.services.plates import FastAlprReader
 from yardlens_api.services.resources import (
@@ -123,9 +130,6 @@ async def build_container(config: Settings, detector: Detector | None) -> Contai
     store = SettingsStore(default_model=config.default_model)
     async with session_factory() as session:
         await store.load(session)
-        interrupted = await close_interrupted_sessions(session)
-    if interrupted:
-        logger.info("Closed loading sessions cut off by a restart", extra={"count": interrupted})
 
     plan = plan_resources(inference_threads=config.inference_threads)
     apply_process_plan(plan, low_priority=config.low_priority and config.environment != "test")
@@ -137,13 +141,28 @@ async def build_container(config: Settings, detector: Detector | None) -> Contai
             "decode_threads": plan.decode_threads,
         },
     )
-    resolved_detector = detector or YoloDetector(
-        models_dir=config.models_dir,
-        model_name=store.detection().model,
-        device=config.inference_device,
-        backend=config.inference_backend,
-        cpu_threads=plan.inference_threads,
-    )
+    # One inference at a time across every model, so the thread budget holds.
+    inference_lock = threading.Lock()
+
+    def new_detector(model_name: str) -> YoloDetector:
+        return YoloDetector(
+            models_dir=config.models_dir,
+            model_name=model_name,
+            device=config.inference_device,
+            backend=config.inference_backend,
+            cpu_threads=plan.inference_threads,
+            lock=inference_lock,
+        )
+
+    def load_model(model_name: str) -> Detector:
+        if detector is not None:
+            return detector  # an injected (test) detector serves every model
+        loaded = new_detector(model_name)
+        loaded.load(model_name)
+        return loaded
+
+    resolved_detector = detector or new_detector(store.detection().model)
+    models = ModelPool(load_model)
 
     def budget() -> Budget:
         performance = store.performance()
@@ -158,8 +177,9 @@ async def build_container(config: Settings, detector: Detector | None) -> Contai
     monitor = ResourceMonitor(
         plan=plan,
         budget=budget,
-        detector_busy_seconds=lambda: resolved_detector.busy_seconds,
+        detector_busy_seconds=lambda: resolved_detector.busy_seconds + models.busy_seconds,
         inference_on_gpu=lambda: resolved_detector.status.device.startswith(("cuda", "mps")),
+        data_dir=config.data_dir,
     )
     bus = EventBus()
     http_client = httpx.AsyncClient()
@@ -194,6 +214,7 @@ async def build_container(config: Settings, detector: Detector | None) -> Contai
         on_session=recorder.submit_session,
         plate_reader=FastAlprReader(threads=plan.plate_threads) if detector is None else None,
         limits=monitor.limits,
+        detector_for=models.get,
         names=names,
         workers_enabled=config.workers_enabled,
     )
@@ -202,6 +223,7 @@ async def build_container(config: Settings, detector: Detector | None) -> Contai
         engine=engine,
         session_factory=session_factory,
         detector=resolved_detector,
+        models=models,
         settings_store=store,
         cameras=manager,
         bus=bus,
@@ -216,8 +238,20 @@ async def build_container(config: Settings, detector: Detector | None) -> Contai
 async def _start_workers(container: Container) -> None:
     async with container.session_factory() as session:
         rows = (await session.scalars(select(Camera).order_by(Camera.id))).all()
+        running = (
+            {camera.id for camera in rows if camera.enabled}
+            if container.settings.workers_enabled
+            else set[int]()
+        )
+        resumable, closed = await take_interrupted_sessions(session, running_cameras=running)
+    if closed:
+        logger.info("Closed loading sessions cut off by a restart", extra={"count": closed})
     for camera in rows:
-        container.cameras.sync(camera_config(camera), enabled=camera.enabled)
+        container.cameras.sync(
+            camera_config(camera), enabled=camera.enabled, resume=resumable.get(camera.id)
+        )
+    general = container.settings_store.detection().model
+    container.models.retain(container.cameras.models_in_use() - {general})
 
 
 async def _load_model(container: Container) -> None:
@@ -229,17 +263,25 @@ async def _load_model(container: Container) -> None:
 
 
 async def _retention_loop(container: Container) -> None:
-    retention = timedelta(days=container.settings.event_retention_days)
+    settings = container.settings
+    retention = timedelta(days=settings.event_retention_days)
+    image_retention = timedelta(days=settings.session_image_retention_days)
     while True:
         try:
             async with container.session_factory() as session:
                 deleted = await purge_events_before(
-                    session, datetime.now(UTC) - retention, container.settings.snapshots_dir
+                    session, datetime.now(UTC) - retention, settings.snapshots_dir
                 )
+                images = await purge_session_images_before(
+                    session, datetime.now(UTC) - image_retention
+                )
+            await remove_snapshot_files(settings.snapshots_dir, images)
             if deleted:
                 logger.info("Purged old events", extra={"count": deleted})
+            if images:
+                logger.info("Purged old loading session photos", extra={"count": len(images)})
         except Exception:
-            logger.exception("Event retention cleanup failed")
+            logger.exception("Retention cleanup failed")
         await asyncio.sleep(_RETENTION_INTERVAL_SECONDS)
 
 

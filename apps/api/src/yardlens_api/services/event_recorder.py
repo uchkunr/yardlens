@@ -1,13 +1,27 @@
-"""Consumes worker events on the event loop: persists them, broadcasts them and notifies."""
+"""Consumes worker events on the event loop: persists them, broadcasts them and notifies.
+
+A database that is briefly unreachable (a restart, a network blip) must not cost data: events and
+loading sessions are kept and retried with backoff until they are saved. Rows the database
+rejects outright (an event for a camera deleted in the meantime) are dropped one by one, so they
+cannot hold the rest back. For sessions only the latest state matters: each update carries the
+whole session, so a newer one replaces any update still waiting to be saved.
+"""
 
 import asyncio
 import contextlib
 import json
 import logging
 from collections.abc import Callable
+from enum import Enum, auto
 from pathlib import Path
 
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import (
+    DBAPIError,
+    IntegrityError,
+    InterfaceError,
+    OperationalError,
+    SQLAlchemyError,
+)
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from yardlens_api.core.enums import CameraStatus, EventType
@@ -24,6 +38,27 @@ logger = logging.getLogger(__name__)
 
 _BATCH_SIZE = 100
 _BATCH_WINDOW_SECONDS = 0.25
+RETRY_INITIAL_SECONDS = 1.0
+RETRY_MAX_SECONDS = 30.0
+
+
+class Outcome(Enum):
+    SAVED = auto()
+    DROPPED = auto()
+    RETRY = auto()
+
+
+def is_transient(exc: BaseException) -> bool:
+    """Connection trouble worth retrying, as opposed to data the database refuses."""
+    if isinstance(exc, IntegrityError):
+        return False
+    if isinstance(exc, DBAPIError) and exc.connection_invalidated:
+        return True
+    return isinstance(exc, OperationalError | InterfaceError | OSError | TimeoutError)
+
+
+def next_delay(delay: float) -> float:
+    return min(delay * 2, RETRY_MAX_SECONDS)
 
 
 class EventRecorder:
@@ -48,6 +83,9 @@ class EventRecorder:
         self._sessions: asyncio.Queue[SessionState] = asyncio.Queue(maxsize=1_000)
         self._sessions_task: asyncio.Task[None] | None = None
         self._notifications: set[asyncio.Task[bool]] = set()
+        # Work taken off the queues but not saved yet; flushed on shutdown.
+        self._inflight: list[WorkerEvent] = []
+        self._pending_sessions: dict[str, SessionState] = {}
 
     def submit(self, event: WorkerEvent) -> None:
         """Enqueue an event. Must be called on the event loop thread."""
@@ -77,11 +115,23 @@ class EventRecorder:
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
-        await self._flush_remaining()
-        while not self._sessions.empty():
-            await self._save_session(self._sessions.get_nowait())
+        # One last attempt each; whatever still fails is reported, not retried forever.
+        batch = self._inflight + [self._queue.get_nowait() for _ in range(self._queue.qsize())]
+        if batch and await self._persist(batch) is Outcome.RETRY:
+            logger.error(
+                "Database unreachable at shutdown; events lost", extra={"count": len(batch)}
+            )
+        self._take_session_updates()
+        for state in list(self._pending_sessions.values()):
+            if await self._save_session(state) is Outcome.RETRY:
+                logger.error(
+                    "Database unreachable at shutdown; session update lost",
+                    extra={"session_id": state.id},
+                )
         if self._notifications:
             await asyncio.wait(self._notifications, timeout=5.0)
+
+    # -- events --------------------------------------------------------------------------------
 
     async def _run(self) -> None:
         while True:
@@ -95,33 +145,20 @@ class EventRecorder:
                     batch.append(await asyncio.wait_for(self._queue.get(), timeout))
                 except TimeoutError:
                     break
-            await self._persist(batch)
+            self._inflight = batch
+            delay = RETRY_INITIAL_SECONDS
+            while await self._persist(batch) is Outcome.RETRY:
+                logger.warning(
+                    "Database unavailable; will retry saving events",
+                    extra={"count": len(batch), "retry_in": delay},
+                )
+                await asyncio.sleep(delay)
+                delay = next_delay(delay)
+            self._inflight = []
 
-    async def _run_sessions(self) -> None:
-        while True:
-            await self._save_session(await self._sessions.get())
-
-    async def _save_session(self, state: SessionState) -> None:
-        try:
-            async with self._session_factory() as session:
-                row = await save_session(session, state)
-                read = row_to_read(row, self._camera_name(state.camera_id))
-        except SQLAlchemyError:
-            logger.warning(
-                "Could not save loading session", extra={"session_id": state.id}, exc_info=True
-            )
-            return
-        self._bus.publish(BusMessage(kind="session", data=read.model_dump_json()))
-
-    async def _flush_remaining(self) -> None:
-        batch: list[WorkerEvent] = []
-        while not self._queue.empty():
-            batch.append(self._queue.get_nowait())
-        if batch:
-            await self._persist(batch)
-
-    async def _persist(self, batch: list[WorkerEvent]) -> None:
-        rows = [
+    @staticmethod
+    def _rows(batch: list[WorkerEvent]) -> list[Event]:
+        return [
             Event(
                 camera_id=item.camera_id,
                 type=item.type.value,
@@ -134,15 +171,40 @@ class EventRecorder:
             )
             for item in batch
         ]
+
+    async def _persist(self, batch: list[WorkerEvent]) -> Outcome:
+        rows = self._rows(batch)
         try:
             async with self._session_factory() as session:
                 session.add_all(rows)
                 await session.commit()
-        except SQLAlchemyError:
-            # Usually a camera deleted while its events were in flight (FK violation).
-            logger.warning("Could not persist events", extra={"count": len(rows)}, exc_info=True)
-            return
+        except (SQLAlchemyError, OSError, TimeoutError) as exc:
+            if is_transient(exc):
+                return Outcome.RETRY
+            # Usually a camera deleted while its events were in flight (FK violation): save
+            # the others one by one.
+            rows = await self._persist_each(batch)
+        self._announce(rows)
+        return Outcome.SAVED
 
+    async def _persist_each(self, batch: list[WorkerEvent]) -> list[Event]:
+        saved: list[Event] = []
+        for row in self._rows(batch):
+            try:
+                async with self._session_factory() as session:
+                    session.add(row)
+                    await session.commit()
+            except SQLAlchemyError, OSError, TimeoutError:
+                logger.warning(
+                    "Dropped an event the database rejected",
+                    extra={"camera_id": row.camera_id, "type": row.type},
+                    exc_info=True,
+                )
+            else:
+                saved.append(row)
+        return saved
+
+    def _announce(self, rows: list[Event]) -> None:
         telegram = self._telegram_settings()
         for row in rows:
             name = self._camera_name(row.camera_id)
@@ -150,6 +212,53 @@ class EventRecorder:
             self._bus.publish(BusMessage(kind="event", data=read.model_dump_json()))
             if telegram.enabled:
                 self._schedule_notification(telegram, row, name)
+
+    # -- loading sessions ----------------------------------------------------------------------
+
+    def _take_session_updates(self) -> None:
+        """Move queued updates into the pending map; a newer state replaces an older one."""
+        while not self._sessions.empty():
+            state = self._sessions.get_nowait()
+            self._pending_sessions[state.id] = state
+
+    async def _run_sessions(self) -> None:
+        delay = RETRY_INITIAL_SECONDS
+        while True:
+            if not self._pending_sessions:
+                state = await self._sessions.get()
+                self._pending_sessions[state.id] = state
+            self._take_session_updates()
+            session_id, state = next(iter(self._pending_sessions.items()))
+            outcome = await self._save_session(state)
+            if outcome is Outcome.RETRY:
+                logger.warning(
+                    "Database unavailable; will retry saving a loading session",
+                    extra={"session_id": session_id, "retry_in": delay},
+                )
+                await asyncio.sleep(delay)
+                delay = next_delay(delay)
+                continue
+            delay = RETRY_INITIAL_SECONDS
+            # A newer state that arrived during the save is still queued and comes next.
+            if self._pending_sessions.get(session_id) is state:
+                del self._pending_sessions[session_id]
+
+    async def _save_session(self, state: SessionState) -> Outcome:
+        try:
+            async with self._session_factory() as session:
+                row = await save_session(session, state)
+                read = row_to_read(row, self._camera_name(state.camera_id))
+        except (SQLAlchemyError, OSError, TimeoutError) as exc:
+            if is_transient(exc):
+                return Outcome.RETRY
+            logger.warning(
+                "Dropped a loading session the database rejected",
+                extra={"session_id": state.id},
+                exc_info=True,
+            )
+            return Outcome.DROPPED
+        self._bus.publish(BusMessage(kind="session", data=read.model_dump_json()))
+        return Outcome.SAVED
 
     def _schedule_notification(self, settings: TelegramSettings, row: Event, name: str) -> None:
         snapshot = self._snapshots_dir / row.snapshot_path if row.snapshot_path else None

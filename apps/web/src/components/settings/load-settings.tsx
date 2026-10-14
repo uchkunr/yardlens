@@ -2,7 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Cpu, MemoryStick, MonitorCog, ScanSearch } from "lucide-react";
+import { AlertTriangle, Cpu, HardDrive, MemoryStick, MonitorCog, ScanSearch } from "lucide-react";
 import { useEffect, type ReactNode } from "react";
 import { Controller, useForm, useWatch } from "react-hook-form";
 import { Area, AreaChart, CartesianGrid, ReferenceLine, XAxis, YAxis } from "recharts";
@@ -136,7 +136,7 @@ function LoadHistory({ data }: { data: SystemResources }) {
 function LoadMonitor({ data }: { data: SystemResources }) {
   const { t, f } = useI18n();
   const m = t.load;
-  const { load, cpu, memory, gpu, inference } = data;
+  const { load, cpu, memory, disk, gpu, inference } = data;
   const fps = t.camera.fps(f.decimal(load.stream_fps, 0));
   const share = f.percent(load.fps_scale);
   const hint =
@@ -170,7 +170,15 @@ function LoadMonitor({ data }: { data: SystemResources }) {
           </Alert>
         )}
 
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {disk?.images_paused ? (
+          <Alert variant="destructive">
+            <HardDrive aria-hidden />
+            <AlertTitle>{m.disk}</AlertTitle>
+            <AlertDescription>{m.imagesPaused}</AlertDescription>
+          </Alert>
+        ) : null}
+
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           <Meter
             label={m.cpu}
             icon={<Cpu aria-hidden />}
@@ -185,6 +193,11 @@ function LoadMonitor({ data }: { data: SystemResources }) {
             <div>{m.memoryUsed(f.bytes(memory.used_bytes), f.bytes(memory.total_bytes))}</div>
             <div>{m.yardlensShare(f.bytes(memory.process_bytes))}</div>
           </Meter>
+          {disk ? (
+            <Meter label={m.disk} icon={<HardDrive aria-hidden />} value={f.percent(disk.percent / 100)} percent={disk.percent}>
+              <div>{m.diskFree(f.bytes(disk.free_bytes), f.bytes(disk.total_bytes))}</div>
+            </Meter>
+          ) : null}
           {gpu ? (
             <Meter
               label={m.gpu}

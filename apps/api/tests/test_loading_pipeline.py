@@ -98,3 +98,34 @@ async def test_a_loaded_truck_becomes_one_completed_session(client: httpx.AsyncC
     assert not [event for event in events if event["class_name"] == "suitcase"]
     completed = next(event for event in events if event["type"] == "loading_completed")
     assert completed["details"]["session_id"] == session["id"]
+
+
+def test_offline_evaluation_counts_like_a_camera() -> None:
+    import numpy as np
+
+    from yardlens_api.evaluate import evaluate_frames
+    from yardlens_api.schemas.camera import CountingLine, LoadingZone, ZonePoint
+    from yardlens_api.schemas.settings import DetectionSettings
+
+    frame = np.zeros((120, 160, 3), dtype=np.uint8)
+    frames = ((call / 15, frame) for call in range(80))
+    result = evaluate_frames(
+        frames,
+        detector=FakeDetector(_loading_scene),
+        settings=DetectionSettings(classes=["truck", "suitcase"], cargo_classes=["suitcase"]),
+        line=CountingLine(x1=0.0, y1=0.5, x2=1.0, y2=0.5),
+        zone=LoadingZone(
+            points=[
+                ZonePoint(x=0.0, y=0.75),
+                ZonePoint(x=0.6, y=0.75),
+                ZonePoint(x=0.6, y=1.0),
+                ZonePoint(x=0.0, y=1.0),
+            ]
+        ),
+        fps=15,
+        arrive_after=1.0,
+        depart_after=1.5,
+    )
+    assert result.frames == 80
+    assert len(result.sessions) == 1
+    assert result.loaded + result.sessions[0].unloaded == SACKS

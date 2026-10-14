@@ -344,3 +344,14 @@ export function useSystemResources() {
     refetchInterval: 2_000,
   });
 }
+
+/** Classes a model detects; loads the model on the server the first time it is asked for. */
+export function useModelClasses(model: string | undefined, enabled = true) {
+  return useQuery({
+    queryKey: ["settings", "classes", model] as const,
+    queryFn: () =>
+      unwrap(api.GET("/api/settings/models/{model}/classes", { params: { path: { model: model ?? "" } } })),
+    enabled: enabled && Boolean(model),
+    staleTime: Infinity,
+  });
+}

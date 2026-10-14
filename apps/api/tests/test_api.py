@@ -333,3 +333,34 @@ async def test_system_resources_and_performance_settings(client: httpx.AsyncClie
 
     too_low = await client.put("/api/settings", json={"performance": {"cpu_limit_percent": 10}})
     assert too_low.status_code == 422
+
+
+@pytest.mark.usefixtures("video_file")
+async def test_a_camera_can_have_detection_settings_of_its_own(client: httpx.AsyncClient) -> None:
+    camera = await _create_camera(client, enabled=False)
+    url = f"/api/cameras/{camera['id']}"
+    assert camera["detection"] is None
+
+    own = {"confidence": 0.5, "classes": ["truck", "suitcase"], "cargo_classes": ["suitcase"]}
+    saved = await client.patch(url, json={"detection": own})
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["detection"] == {"model": None, **own}
+
+    for detection, message in (
+        ({"classes": ["sack"]}, "Unknown classes: sack"),
+        (
+            {"classes": ["truck"], "cargo_classes": ["suitcase"]},
+            "Cargo classes must be among the detected classes",
+        ),
+        ({"model": "missing.pt"}, "Unsupported model 'missing.pt'"),
+    ):
+        rejected = await client.patch(url, json={"detection": detection})
+        assert rejected.status_code == 422
+        assert rejected.json()["detail"] == message
+
+    cleared = await client.patch(url, json={"detection": None})
+    assert cleared.json()["detection"] is None
+
+    classes = await client.get("/api/settings/models/yolo26n.pt/classes")
+    assert classes.status_code == 200
+    assert "truck" in classes.json()

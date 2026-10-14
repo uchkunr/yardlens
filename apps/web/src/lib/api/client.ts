@@ -27,6 +27,7 @@ export type SystemResources = Schemas["SystemResources"];
 export type PerformanceSettings = Schemas["PerformanceSettings"];
 export type Activity = Schemas["Activity"];
 export type LoadLevel = Schemas["LoadLevelName"];
+export type CameraDetection = Schemas["CameraDetection"];
 
 /** Direct API origin, used for long-lived connections (MJPEG and SSE). */
 export const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8100").replace(
