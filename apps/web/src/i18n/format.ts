@@ -83,7 +83,7 @@ export function createFormatters(locale: Locale, messages: Messages) {
 
     /** A COCO class name as shown to people: "Автомобиль" or "Car". */
     className(name: string | null | undefined) {
-      if (!name) return "—";
+      if (!name) return "-";
       const label = locale === "ru" ? (CLASS_NAMES_RU[name] ?? name) : name;
       return label.charAt(0).toUpperCase() + label.slice(1);
     },

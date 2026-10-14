@@ -88,12 +88,12 @@ function CameraStats({ camera }: { camera: Camera }) {
       <Stat label={t.camera.inViewNow} value={f.count(visibleTotal)} icon={<Eye aria-hidden />} />
       <Stat
         label={t.camera.crossedIn}
-        value={camera.line ? f.count(runtime.line_in) : "—"}
+        value={camera.line ? f.count(runtime.line_in) : "-"}
         icon={<ArrowDownRight className="text-chart-2" aria-hidden />}
       />
       <Stat
         label={t.camera.crossedOut}
-        value={camera.line ? f.count(runtime.line_out) : "—"}
+        value={camera.line ? f.count(runtime.line_out) : "-"}
         icon={<ArrowUpRight className="text-chart-3" aria-hidden />}
       />
       <Stat

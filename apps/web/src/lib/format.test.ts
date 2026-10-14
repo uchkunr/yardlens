@@ -17,7 +17,7 @@ describe("format helpers", () => {
     expect(ru.className("truck")).toBe("Грузовик");
     expect(ru.className("stop sign")).toBe("Знак «Стоп»");
     expect(en.className("truck")).toBe("Truck");
-    expect(en.className(null)).toBe("—");
+    expect(en.className(null)).toBe("-");
   });
 
   test("count groups thousands the local way", () => {

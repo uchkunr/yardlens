@@ -2,13 +2,13 @@
 
 Each worker owns three daemon threads:
 
-* **capture** — connects to the source (with exponential backoff) and takes every frame off the
+* **capture** - connects to the source (with exponential backoff) and takes every frame off the
   stream in real time, but converts and publishes only the frames that inference or a viewer
   is about to use; the rest are dropped undecoded, so slow consumers never build a queue.
-* **inference** — takes the latest frame, runs detection, tracking and line counting, and emits
+* **inference** - takes the latest frame, runs detection, tracking and line counting, and emits
   events with snapshots. Its rate follows ``Pacer``: the configured ``inference_fps`` while
   something moves, a trickle while the scene is still, both scaled by the load governor.
-* **render** — at up to ``stream_fps`` draws the latest tracks onto each new frame and publishes
+* **render** - at up to ``stream_fps`` draws the latest tracks onto each new frame and publishes
   the annotated JPEG for live viewing, so the feed stays smooth even at a low inference rate.
   It only runs while someone is watching (see ``latest_jpeg``).
 
@@ -208,6 +208,9 @@ class CameraWorker:
         self._next_inference_at = 0.0
         self._inference_seq = 0
         self._last_published = float("-inf")
+        # Time between frames of the source, smoothed; it sets the live view's tolerance.
+        self._frame_interval = 1.0 / 25
+        self._last_grab: float | None = None
         self._hardware_decode = options.hardware_decode
         self._hardware_decoding = False
 
@@ -471,16 +474,27 @@ class CameraWorker:
         if now >= self._next_inference_at and self._frame_seq == self._inference_seq:
             return True
         if now - self._last_viewed <= self._options.viewer_idle_seconds:
-            return now - self._last_published >= 1.0 / self._limits().stream_fps
+            return now - self._last_published >= self._display_gap()
         return False
+
+    def _display_gap(self) -> float:
+        """Shortest gap between live-view frames. Half a source frame short of the frame rate's
+        interval: otherwise a 30 fps source asked for 15 fps would deliver every frame that
+        arrives a hair too early one frame late, which is 10 fps and uneven."""
+        return max(0.0, 1.0 / self._limits().stream_fps - self._frame_interval / 2)
 
     def _pump_frames(self, reader: FrameReader) -> bool:
         """Read until the stream ends or stalls. Returns whether any frame was received."""
         received = False
         empty_reads = 0
+        self._last_grab = None
         while not self._stop.is_set():
             grabbed = reader.grab()
             now = time.monotonic()
+            if grabbed:
+                if self._last_grab is not None and 0 < now - self._last_grab < 1.0:
+                    self._frame_interval += 0.1 * (now - self._last_grab - self._frame_interval)
+                self._last_grab = now
             frame = reader.retrieve() if grabbed and self._frame_wanted(now) else None
             if not grabbed or (frame is None and self._latest_frame is None):
                 empty_reads += 1
@@ -750,14 +764,14 @@ class CameraWorker:
     def _render_loop(self) -> None:
         last_seq = 0
         while not self._stop.is_set():
-            started = time.monotonic()
-            limits = self._limits()
             with self._frame_ready:
                 while self._frame_seq == last_seq and not self._stop.is_set():
                     self._frame_ready.wait(timeout=1.0)
                 frame = self._latest_frame
                 frame_time = self._latest_frame_time
                 last_seq = self._frame_seq
+            started = time.monotonic()
+            limits = self._limits()
             if self._stop.is_set():
                 break
             if frame is None:
@@ -780,8 +794,8 @@ class CameraWorker:
                 with self._output_lock:
                     self._latest_jpeg = jpeg
                     self._jpeg_seq += 1
-            interval = 1.0 / limits.stream_fps
-            self._stop.wait(max(0.0, interval - (time.monotonic() - started)))
+            # Never longer than capture's own spacing, so no frame it converts for us is skipped.
+            self._stop.wait(max(0.0, self._display_gap() - (time.monotonic() - started)))
 
     def _save_snapshot(self, frame: Frame, occurred_at: datetime) -> str | None:
         relative = Path(

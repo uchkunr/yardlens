@@ -98,8 +98,10 @@ export async function unwrap<T>(request: Promise<FetchResult<T>>): Promise<T> {
   return data as T;
 }
 
-export function streamUrl(cameraId: number): string {
-  return `${API_URL}/api/cameras/${cameraId}/stream.mjpeg`;
+/** `attempt` makes each reconnect a new URL, so the browser never reuses a broken image. */
+export function streamUrl(cameraId: number, attempt = 0): string {
+  const base = `${API_URL}/api/cameras/${cameraId}/stream.mjpeg`;
+  return attempt > 0 ? `${base}?attempt=${attempt}` : base;
 }
 
 export function snapshotUrl(cameraId: number, options: { raw?: boolean; nonce?: number } = {}) {

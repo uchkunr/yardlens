@@ -137,10 +137,10 @@ export function SessionSheet({
               <dl className="divide-y">
                 <Row label={m.arrived}>{f.time(session.arrived_at)}</Row>
                 <Row label={m.loadingStarted}>
-                  {session.loading_started_at ? f.time(session.loading_started_at) : "—"}
+                  {session.loading_started_at ? f.time(session.loading_started_at) : "-"}
                 </Row>
                 <Row label={m.loadingFinished}>
-                  {session.loading_finished_at ? f.time(session.loading_finished_at) : "—"}
+                  {session.loading_finished_at ? f.time(session.loading_finished_at) : "-"}
                 </Row>
                 <Row label={m.departed}>{session.departed_at ? f.time(session.departed_at) : m.stillHere}</Row>
                 <Row label={m.duration}>{f.duration(session.duration_seconds)}</Row>

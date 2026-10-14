@@ -205,7 +205,7 @@ export function useCreateCamera() {
     onSuccess: (camera) => {
       upsertCamera(queryClient, camera);
       void queryClient.invalidateQueries({ queryKey: queryKeys.stats });
-      toast.success(t.toasts.cameraAdded(camera.name));
+      toast.success(t.toasts.cameraAdded);
     },
     onError: (error) => toast.error(t.toasts.addFailed, { description: f.error(error) }),
   });
@@ -219,7 +219,7 @@ export function useUpdateCamera() {
       unwrap(api.PATCH("/api/cameras/{camera_id}", { params: { path: { camera_id: id } }, body })),
     onSuccess: (camera) => {
       upsertCamera(queryClient, camera);
-      toast.success(t.toasts.cameraSaved(camera.name));
+      toast.success(t.toasts.cameraSaved);
     },
     onError: (error) => toast.error(t.toasts.saveFailed, { description: f.error(error) }),
   });
@@ -258,7 +258,7 @@ export function useToggleCamera() {
     },
     onSuccess: (camera) => {
       upsertCamera(queryClient, camera);
-      toast.success((camera.enabled ? t.toasts.cameraEnabled : t.toasts.cameraDisabled)(camera.name));
+      toast.success(camera.enabled ? t.toasts.cameraEnabled : t.toasts.cameraDisabled);
     },
   });
 }
@@ -285,7 +285,7 @@ export function useDeleteCamera() {
       queryClient.removeQueries({ queryKey: queryKeys.camera(camera.id) });
       void queryClient.invalidateQueries({ queryKey: ["events"] });
       void queryClient.invalidateQueries({ queryKey: queryKeys.stats });
-      toast.success(t.toasts.cameraDeleted(camera.name));
+      toast.success(t.toasts.cameraDeleted);
     },
   });
 }

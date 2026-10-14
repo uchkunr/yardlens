@@ -154,7 +154,7 @@ export function LoadingView() {
             <Total label={m.loaded} value={f.count(totals.loaded)} />
             <Total
               label={m.average}
-              value={totals.average_duration_seconds !== null ? f.duration(totals.average_duration_seconds) : "—"}
+              value={totals.average_duration_seconds !== null ? f.duration(totals.average_duration_seconds) : "-"}
             />
           </>
         ) : (

@@ -272,7 +272,7 @@ def build_workbook(
             [
                 number,
                 item.arrived_at.astimezone(tz).date(),
-                format_plate(item.plate) if item.plate else "—",
+                format_plate(item.plate) if item.plate else "-",
                 item.camera_name,
                 clock(item.arrived_at),
                 clock(item.loading_started_at),

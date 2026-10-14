@@ -180,7 +180,7 @@ export function EventsView() {
                     <TableCell>{f.className(event.class_name)}</TableCell>
                     <TableCell className="hidden max-w-48 truncate lg:table-cell">{event.camera_name}</TableCell>
                     <TableCell className="text-muted-foreground hidden text-right tabular-nums xl:table-cell">
-                      {event.confidence !== null ? f.percent(event.confidence) : "—"}
+                      {event.confidence !== null ? f.percent(event.confidence) : "-"}
                     </TableCell>
                     <TableCell className="text-muted-foreground pr-4 text-right whitespace-nowrap tabular-nums">
                       <time dateTime={event.created_at}>{f.dateTime(event.created_at)}</time>

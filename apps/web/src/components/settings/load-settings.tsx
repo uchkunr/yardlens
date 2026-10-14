@@ -189,7 +189,7 @@ function LoadMonitor({ data }: { data: SystemResources }) {
             <Meter
               label={m.gpu}
               icon={<MonitorCog aria-hidden />}
-              value={gpu.percent !== null ? f.percent(gpu.percent / 100) : "—"}
+              value={gpu.percent !== null ? f.percent(gpu.percent / 100) : "-"}
               percent={gpu.percent ?? 0}
             >
               <div className="truncate">{gpu.name}</div>

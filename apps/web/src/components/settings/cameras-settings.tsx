@@ -149,7 +149,7 @@ export function CamerasSettings() {
                     </TableCell>
                     <TableCell className="hidden text-right tabular-nums lg:table-cell">{camera.inference_fps}</TableCell>
                     <TableCell className="text-muted-foreground hidden lg:table-cell">
-                      {camera.line ? s.lineSet : "—"}
+                      {camera.line ? s.lineSet : "-"}
                     </TableCell>
                     <TableCell className="text-center">
                       <Switch
@@ -204,7 +204,7 @@ export function CamerasSettings() {
       <AlertDialog open={dialog?.kind === "delete"} onOpenChange={(open) => !open && close()}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{s.deleteTitle(current?.name ?? "")}</AlertDialogTitle>
+            <AlertDialogTitle>{s.deleteTitle}</AlertDialogTitle>
             <AlertDialogDescription>
               {s.deleteDescription}
             </AlertDialogDescription>

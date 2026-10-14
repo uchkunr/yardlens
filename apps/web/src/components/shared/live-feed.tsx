@@ -23,6 +23,10 @@ import { cn } from "@/lib/utils";
  */
 const MAX_STREAMS = 4;
 const SNAPSHOT_REFRESH_MS = 1_000;
+// After a stream drops (API restart, network blip) snapshots fill in, then the stream is tried
+// again: soon at first, less often while it keeps failing.
+const RETRY_FIRST_MS = 2_000;
+const RETRY_MAX_MS = 30_000;
 
 class StreamSlots {
   private holders: string[] = [];
@@ -126,13 +130,17 @@ function SnapshotPoller({ cameraId, alt, className }: { cameraId: number; alt: s
 
 function MjpegStream({
   cameraId,
+  attempt,
   alt,
   className,
+  onFrame,
   onFailure,
 }: {
   cameraId: number;
+  attempt: number;
   alt: string;
   className?: string;
+  onFrame: () => void;
   onFailure: () => void;
 }) {
   const ref = useRef<HTMLImageElement>(null);
@@ -144,8 +152,54 @@ function MjpegStream({
     };
   }, []);
   return (
-    <img ref={ref} src={streamUrl(cameraId)} alt={alt} className={className} onError={onFailure} draggable={false} />
+    <img
+      ref={ref}
+      src={streamUrl(cameraId, attempt)}
+      alt={alt}
+      className={className}
+      onLoad={onFrame}
+      onError={onFailure}
+      draggable={false}
+    />
   );
+}
+
+/** Stream state with automatic reconnection: a failed stream is retried with backoff. */
+function useStreamRetry(online: boolean) {
+  const [failures, setFailures] = useState(0);
+  const [waiting, setWaiting] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    if (!waiting) return;
+    const delay = Math.min(RETRY_FIRST_MS * 2 ** Math.max(0, failures - 1), RETRY_MAX_MS);
+    const timer = setTimeout(() => {
+      setWaiting(false);
+      setAttempt((value) => value + 1);
+    }, delay);
+    return () => clearTimeout(timer);
+  }, [waiting, failures]);
+
+  // A camera coming back online is worth an immediate try.
+  const [wasOnline, setWasOnline] = useState(online);
+  if (online !== wasOnline) {
+    setWasOnline(online);
+    if (online) {
+      setWaiting(false);
+      setFailures(0);
+      setAttempt((value) => value + 1);
+    }
+  }
+
+  return {
+    waiting,
+    attempt,
+    onFrame: () => setFailures(0),
+    onFailure: () => {
+      setFailures((value) => value + 1);
+      setWaiting(true);
+    },
+  };
 }
 
 const OVERLAY_ICONS: Partial<Record<CameraStatus, ReactNode>> = {
@@ -170,8 +224,8 @@ export function LiveFeed({ cameraId, name, status, priority = false, className, 
   const container = useRef<HTMLDivElement>(null);
   const visible = useIsVisible(container);
   const online = status === "online";
-  const [streamFailed, setStreamFailed] = useState(false);
-  const granted = useStreamSlot(visible && online && !streamFailed, priority);
+  const stream = useStreamRetry(online);
+  const granted = useStreamSlot(visible && online && !stream.waiting, priority);
   const { t } = useI18n();
   const overlay = status === "online" ? null : { icon: OVERLAY_ICONS[status], label: t.feed[status] };
   const alt = t.feed.alt(name);
@@ -181,7 +235,15 @@ export function LiveFeed({ cameraId, name, status, priority = false, className, 
     <div ref={container} className={cn("feed-frame", className)}>
       {online && visible ? (
         granted ? (
-          <MjpegStream cameraId={cameraId} alt={alt} className={imageClass} onFailure={() => setStreamFailed(true)} />
+          <MjpegStream
+            key={stream.attempt}
+            cameraId={cameraId}
+            attempt={stream.attempt}
+            alt={alt}
+            className={imageClass}
+            onFrame={stream.onFrame}
+            onFailure={stream.onFailure}
+          />
         ) : (
           <SnapshotPoller cameraId={cameraId} alt={alt} className={imageClass} />
         )

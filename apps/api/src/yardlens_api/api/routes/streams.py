@@ -13,7 +13,8 @@ from yardlens_api.db.models import Camera
 router = APIRouter(prefix="/cameras", tags=["streams"])
 
 _BOUNDARY = "yardlensframe"
-_POLL_SECONDS = 0.05
+# Short, so frames go out as evenly as they are rendered; a check costs next to nothing.
+_POLL_SECONDS = 0.01
 _RENDER_WAKE_SECONDS = 2.0
 _NO_STORE = {"Cache-Control": "no-store, no-cache, must-revalidate", "Pragma": "no-cache"}
 
