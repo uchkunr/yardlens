@@ -8,7 +8,8 @@ from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from yardlens_api.core.config import Settings
-from yardlens_api.services.camera_manager import CameraManager
+from yardlens_api.services.auth import AuthService
+from yardlens_api.services.cluster import Cluster
 from yardlens_api.services.detector import Detector, ModelPool
 from yardlens_api.services.event_bus import EventBus
 from yardlens_api.services.event_recorder import EventRecorder
@@ -27,12 +28,13 @@ class Container:
     detector: Detector
     models: ModelPool
     settings_store: SettingsStore
-    cameras: CameraManager
+    cameras: Cluster
     bus: EventBus
     recorder: EventRecorder
     notifier: TelegramNotifier
     http_client: httpx.AsyncClient
     monitor: ResourceMonitor
+    auth: AuthService
     started_at: datetime
 
 

@@ -128,7 +128,7 @@ app-wide SSE connection updates the TanStack Query cache in place.
 (`openapi-typescript` + `openapi-fetch`). After an API change, `bun run gen:api` regenerates the
 types and the type checker points at everything that broke.
 
-**Plain SQL instead of migrations, for now.** [`apps/api/db/schema.sql`](apps/api/db/schema.sql) is
+**Plain SQL instead of migrations, for now.** [`schema.sql`](apps/api/src/yardlens_api/db/schema.sql) is
 three tables, idempotent (`CREATE … IF NOT EXISTS`) and applied by `uv run db-setup`. That's enough
 for an MVP; the next schema change should bring in Alembic.
 
@@ -283,6 +283,12 @@ worth choosing over the 12400F or a Ryzen 5 5600: its integrated graphics decode
 
 ### Running on a server
 
+The simplest is Docker: the server, HTTPS and the database in one Compose file, and any number of
+worker computers that take cameras off the server with one `docker run` command each. See
+[docs/deployment.md](docs/deployment.md).
+
+Without Docker:
+
 ```bash
 bun install
 bun run setup
@@ -325,8 +331,13 @@ Everything lives under `/api`. The full schema is at `/docs`.
 | `GET, PUT /api/settings` | Detection, Telegram and performance settings |
 | `GET /api/settings/models/{model}/classes` | The classes a model detects, for a camera's own settings |
 | `POST /api/settings/telegram/test` | Send a test message |
+| `POST /api/auth/login`, `/refresh`, `/logout`, `/logout-all`, `/password`; `GET /api/auth/me` | Sign-in with HttpOnly cookies (see [deployment](docs/deployment.md#security)) |
+| `GET, POST /api/workers`; `PATCH, DELETE /api/workers/{id}` | Workers with their load and cameras; adding one returns its token and start command once |
+| `PUT /api/workers/local`, `POST /api/workers/rebalance` | Whether this server processes cameras; spread cameras over the nodes |
+| `WS /api/workers/connect` | The worker channel (worker token; see `schemas/worker_protocol.py`) |
 
-Event snapshots are served as static files from `/media/snapshots/`.
+Everything except signing in and the worker endpoints needs a signed-in user. Event snapshots are
+served from `/media/snapshots/`, also to signed-in users only.
 
 ## Configuration
 
@@ -361,6 +372,17 @@ cp apps/web/.env.example apps/web/.env.local
 | `YARDLENS_SESSION_IMAGE_RETENTION_DAYS` | `365` | Photos of older loading sessions are deleted; the sessions stay |
 | `YARDLENS_LOADING_ARRIVE_SECONDS` | `15` | How long a vehicle stands in a loading zone before it counts as arrived |
 | `YARDLENS_LOADING_DEPART_SECONDS` | `60` | How long a bay stays quiet before the vehicle counts as gone |
+| `YARDLENS_PUBLIC_URL` | `http://localhost:3100` | Where people open the dashboard; HTTPS here makes the sign-in cookies Secure |
+| `YARDLENS_ADMIN_USERNAME` / `YARDLENS_ADMIN_PASSWORD` | unset | Create the administrator on first start; otherwise `uv run yardlens-admin create` |
+| `YARDLENS_AUTH_SECRET` | generated | Signs access tokens; generated once into the data directory when unset |
+| `YARDLENS_FORWARDED_ALLOW_IPS` | `127.0.0.1` | Proxies whose `X-Forwarded-*` headers are trusted (Caddy) |
+| `YARDLENS_WORKERS_ENABLED` | `true` | `false`: this server never processes cameras itself |
+| `YARDLENS_WORKER_IMAGE` | `ghcr.io/uchkunr/yardlens` | The image in the dashboard's worker command |
+| `YARDLENS_WORKER_SERVER_URL` | `YARDLENS_PUBLIC_URL` | The address workers connect to |
+| `YARDLENS_CA_CERT_PATH` | unset | The certificate authority behind HTTPS: offered for download, pinned by workers |
+
+A worker (`yardlens-worker`) reads `YARDLENS_SERVER`, `YARDLENS_WORKER_TOKEN` and
+`YARDLENS_CA_PIN`, which its command from the dashboard sets, plus the inference variables above.
 
 **Web** (`apps/web/.env.local`)
 
@@ -395,7 +417,6 @@ why `FrameAnalyzer` has no threads or I/O of its own.
 ```
 apps/
 ├── api/                          FastAPI service (Python 3.14, uv)
-│   ├── db/schema.sql
 │   ├── src/yardlens_api/
 │   │   ├── main.py               app factory, lifespan, retention task
 │   │   ├── bench.py              `yardlens-bench`: cost of a camera on this machine
@@ -424,13 +445,15 @@ apps/
         ├── app/                  overview, loading, cameras, events, settings
         ├── i18n/                 Russian (default) and English copy, formatting
         └── lib/api/              client and types generated from OpenAPI
-deploy/                           systemd units (Linux), startup tasks (Windows)
-docs/                             sack model plan, roadmap of the architecture work left
+deploy/                           Docker Compose, Caddy, worker compose; systemd units, Windows tasks
+docs/                             deployment, sack model plan, roadmap of the architecture work left
 ```
 
 ## Limitations
 
-- **No authentication.** Run it on a trusted network or behind a reverse proxy that handles auth.
+- **One administrator.** There are no other users or roles yet.
+- **Camera tests run on the server.** Checking a camera pinned to a worker on another network from
+  the camera form fails when the server cannot reach that camera; the worker itself still can.
 - **Every frame is still decoded.** Without GPU decoding a 4K stream at 25 fps keeps about a third
   of a core busy even when nothing is converted; frames in use add their conversion on top. Give
   cameras their sub-stream (720p–1080p) where they have one.

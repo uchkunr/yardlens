@@ -1,6 +1,7 @@
 "use client";
 
-import { RefreshCw } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { Download, RefreshCw } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { useLiveEvents } from "@/components/shared/live-events-provider";
@@ -31,7 +32,70 @@ function Indicator({ ok, label }: { ok: boolean; label: string }) {
   );
 }
 
+const CA_URL = "/api/workers/ca.pem";
+
+/** The SHA-256 of the certificate in a PEM file, as browsers and operating systems show it. */
+async function fingerprint(pem: string): Promise<string> {
+  const body = pem.match(/-----BEGIN CERTIFICATE-----([\s\S]+?)-----END CERTIFICATE-----/)?.[1] ?? "";
+  const der = Uint8Array.from(atob(body.replace(/\s+/g, "")), (char) => char.charCodeAt(0));
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", der));
+  return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0").toUpperCase()).join(":");
+}
+
+/** Offered only where the server has a certificate authority of its own (HTTPS through Caddy). */
+function CertificateCard() {
+  const { t } = useI18n();
+  const s = t.system;
+  const certificate = useQuery({
+    queryKey: ["system", "ca"] as const,
+    queryFn: async () => {
+      const response = await fetch(CA_URL, { credentials: "same-origin" });
+      if (!response.ok) return null;
+      return fingerprint(await response.text());
+    },
+    staleTime: Infinity,
+    retry: false,
+  });
+  if (!certificate.data) return null;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{s.certificateTitle}</CardTitle>
+        <CardDescription>{s.certificateDescription}</CardDescription>
+        <CardAction>
+          <Button variant="outline" asChild>
+            <a href={CA_URL} download="yardlens-ca.crt">
+              <Download aria-hidden /> {s.downloadCertificate}
+            </a>
+          </Button>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="space-y-4 text-sm">
+        <div className="space-y-1">
+          <div className="text-muted-foreground text-xs">{s.fingerprint}</div>
+          <div className="font-mono text-xs break-all">{certificate.data}</div>
+        </div>
+        <ul className="text-muted-foreground list-disc space-y-1.5 pl-5">
+          <li>{s.install.windows}</li>
+          <li>{s.install.android}</li>
+          <li>{s.install.ios}</li>
+          <li>{s.install.macos}</li>
+        </ul>
+      </CardContent>
+    </Card>
+  );
+}
+
 export function SystemSettings() {
+  return (
+    <div className="space-y-6">
+      <StatusCard />
+      <CertificateCard />
+    </div>
+  );
+}
+
+function StatusCard() {
   const health = useHealth();
   const { connected } = useLiveEvents();
   const { t, f } = useI18n();

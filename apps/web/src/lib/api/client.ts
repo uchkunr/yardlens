@@ -1,5 +1,6 @@
 import createClient from "openapi-fetch";
 
+import { authFetch, CSRF_HEADERS } from "@/lib/auth";
 import type { components, paths } from "@/lib/api/schema";
 
 export type Schemas = components["schemas"];
@@ -28,15 +29,21 @@ export type PerformanceSettings = Schemas["PerformanceSettings"];
 export type Activity = Schemas["Activity"];
 export type LoadLevel = Schemas["LoadLevelName"];
 export type CameraDetection = Schemas["CameraDetection"];
+export type Cluster = Schemas["ClusterRead"];
+export type Worker = Schemas["WorkerRead"];
+export type WorkerCreated = Schemas["WorkerCreated"];
 
-/** Direct API origin, used for long-lived connections (MJPEG and SSE). */
+/**
+ * Where the browser opens long-lived connections (MJPEG, SSE). Empty means the dashboard's own
+ * origin, as behind Caddy; in development they go straight to the API on :8100.
+ */
 export const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8100").replace(
   /\/$/,
   "",
 );
 
-/** Regular requests go same-origin through the Next.js rewrite to the API. */
-export const api = createClient<paths>({ baseUrl: "" });
+/** Regular requests go same-origin through the Next.js rewrite; a 401 renews the session once. */
+export const api = createClient<paths>({ baseUrl: "", headers: CSRF_HEADERS, fetch: authFetch });
 
 /**
  * `server` errors carry the API's own message; the others are produced here, so the UI can

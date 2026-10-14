@@ -8,6 +8,7 @@ from sse_starlette import EventSourceResponse, ServerSentEvent
 
 from yardlens_api.api.deps import ContainerDep, SessionDep
 from yardlens_api.api.params import check_range
+from yardlens_api.api.security import UserDep
 from yardlens_api.core.enums import EventType
 from yardlens_api.core.errors import NotFoundError
 from yardlens_api.schemas.event import EventPage, EventRead
@@ -43,13 +44,18 @@ async def get_events(
     response_class=EventSourceResponse,
     responses={200: {"content": {"text/event-stream": {}}}},
 )
-async def stream_events(request: Request, container: ContainerDep) -> EventSourceResponse:
-    """Server-sent events: ``event`` (a new EventRead), ``camera_status`` and ``session``."""
+async def stream_events(
+    request: Request, container: ContainerDep, user: UserDep
+) -> EventSourceResponse:
+    """Server-sent events: ``event`` (a new EventRead), ``camera_status`` and ``session``.
+    Ends as soon as the session it was opened with is signed out."""
 
     async def messages() -> AsyncIterator[ServerSentEvent]:
         async with container.bus.subscribe() as queue:
             yield ServerSentEvent(event="ready", data="{}")
             while not await request.is_disconnected():
+                if container.auth.is_revoked(user.family_id):
+                    return
                 try:
                     message = await asyncio.wait_for(queue.get(), timeout=5.0)
                 except TimeoutError:

@@ -1,0 +1,114 @@
+# Builds the Docker images and publishes them to GitHub's container registry for a release:
+#
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# ghcr.io/<owner>/yardlens:<version>-cpu and -cuda   the core: API and worker
+# ghcr.io/<owner>/yardlens-web:<version>             the dashboard
+#
+# The tag must match the version in apps/api/pyproject.toml: the dashboard's worker command names
+# that version, so a worker always runs the same release as its server. Make the packages public
+# once (Package settings > Change visibility) so workers can pull them without logging in.
+name: Images
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: images-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        name: Read the version
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' apps/api/pyproject.toml | head -1)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "v$version" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match version $version in pyproject.toml" >&2
+            exit 1
+          fi
+
+  core:
+    needs: version
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [cpu, cuda]
+    steps:
+      - uses: actions/checkout@v4
+
+      # The CUDA image needs more room than a runner leaves free.
+      - name: Free disk space
+        if: matrix.variant == 'cuda'
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force
+          df -h /
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: names
+        name: Image name
+        run: echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/yardlens" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          build-args: VARIANT=${{ matrix.variant }}
+          push: true
+          tags: |
+            ${{ steps.names.outputs.image }}:${{ needs.version.outputs.version }}-${{ matrix.variant }}
+            ${{ steps.names.outputs.image }}:latest-${{ matrix.variant }}
+          cache-from: type=gha,scope=core-${{ matrix.variant }}
+          cache-to: type=gha,mode=max,scope=core-${{ matrix.variant }}
+
+  web:
+    needs: version
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: names
+        name: Image name
+        run: echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/yardlens-web" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.names.outputs.image }}:${{ needs.version.outputs.version }}
+            ${{ steps.names.outputs.image }}:latest
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web

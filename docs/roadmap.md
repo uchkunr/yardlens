@@ -3,30 +3,25 @@
 Reviewed 2026-10-14. Done since that review: database writes are retried through outages, loading
 sessions survive an API restart, each camera can have its own model and classes, loading bays run
 at full rate while a vehicle is loaded, `yardlens-eval` checks counts against a recording, disk
-space is watched, and CI runs on Linux and Windows. The sack model itself is in
+space is watched, CI runs on Linux and Windows, and there are sign-in, HTTPS, Docker images and
+workers on other machines ([deployment.md](deployment.md)). The sack model itself is in
 [sack-model.md](sack-model.md). What is left:
 
-## Authentication (not scheduled)
+## Users and roles
 
-There is no login, and `GET /api/cameras` returns camera URLs with their credentials, which the
-settings page also shows. Anyone who can reach the dashboard can see camera passwords and change
-or delete cameras. Before the dashboard is reachable beyond a trusted network:
-
-- Put it behind a reverse proxy that handles login (Caddy or nginx with basic auth, or an identity
-  proxy), or add sessions to the API.
-- Return camera URLs with the password masked (`rtsp://admin:••••@host/...`) and keep the stored
-  one when an update sends the masked value back, the way the Telegram token is handled.
+Sign-in, HTTPS and masked camera passwords are done (see [deployment](deployment.md#security)).
+There is one administrator; operators who may only watch would need users with roles.
 
 ## Inference outside the API process
 
-Capture, inference, the web API and database writes share one Python process. A crash in native
-code (FFmpeg, OpenVINO, CUDA) takes the API down with it, and one inference at a time with no
-batching caps throughput. The service managers in `deploy/` restart the process and loading
-sessions resume, so for one to four cameras this is acceptable. Beyond that:
+Workers ([deployment](deployment.md#workers)) run cameras on other machines, and this server's
+own processing can be turned off, so a crash in native code (FFmpeg, OpenVINO, CUDA) on a worker
+no longer touches the API. Cameras that do run on the server still share its process. Next:
 
-- Move camera workers into a separate process (or one per camera) that reports to the API over a
-  queue (Redis streams, NATS, or plain multiprocessing pipes on one machine).
+- Run this server's cameras in a local worker process too (the same agent over a local socket), so
+  the API process never runs native video code.
 - Batch inference across cameras on the GPU; on the CPU keep one model instance per core group.
+- Test a camera from the worker it is pinned to, not from the server.
 
 ## Live view over WebRTC or HLS
 
@@ -39,8 +34,8 @@ six streams per browser by HTTP/1.1. For viewers on phones or over the internet:
 
 ## Database migrations
 
-The schema is `apps/api/db/schema.sql`, made idempotent with `CREATE ... IF NOT EXISTS` and
-`ALTER TABLE ... ADD COLUMN IF NOT EXISTS`. Adding columns works; renaming, changing a type or
+The schema is `apps/api/src/yardlens_api/db/schema.sql`, made idempotent with
+`CREATE ... IF NOT EXISTS` and `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`. Adding columns works; renaming, changing a type or
 moving data does not. Introduce Alembic before the first such change: a baseline revision matching
 the current schema, `alembic stamp head` on existing databases, and `alembic upgrade head` in
 `db-setup`.

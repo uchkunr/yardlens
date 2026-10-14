@@ -1,0 +1,17 @@
+# Keep the build context small: dependencies, caches and runtime data are rebuilt or mounted.
+**/node_modules
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/.next
+**/logs
+.git
+.nx
+.github
+docs
+apps/api/data
+apps/api/tests
+**/.env
+**/.env.*
+!**/.env.example

@@ -100,7 +100,9 @@ class CameraManager:
             if not _needs_restart(current.config, config):
                 current.update_config(config)
                 return
-            self._retire(config.id)
+            # A new source or rate needs a new worker; a vehicle being loaded carries over.
+            resume = resume or current.handoff()
+            self._retire(config.id, detach=True)
         worker = CameraWorker(
             config,
             detector=self._detector,
@@ -120,20 +122,33 @@ class CameraManager:
         self._retire(camera_id)
         self._names.pop(camera_id, None)
 
-    def _retire(self, camera_id: int) -> None:
+    def release(self, camera_id: int) -> InterruptedSession | None:
+        """Stop the camera here because another node takes it over; its open loading session
+        is left open and returned, for that node to carry on."""
+        worker = self._workers.get(camera_id)
+        if worker is None:
+            return None
+        session = worker.handoff()
+        self._retire(camera_id, detach=True)
+        return session
+
+    def _retire(self, camera_id: int, *, detach: bool = False) -> None:
         worker = self._workers.pop(camera_id, None)
         if worker is None:
             return
-        worker.stop()
+        worker.stop(detach=detach)
         self._retiring.add(worker)
         task = self._loop.create_task(asyncio.to_thread(worker.join, 10.0))
         task.add_done_callback(lambda _: self._retiring.discard(worker))
 
     async def shutdown(self, join_timeout: float = 10.0) -> None:
-        workers = [*self._workers.values(), *self._retiring]
+        running = list(self._workers.values())
         self._workers.clear()
-        for worker in workers:
-            worker.stop()
+        for worker in running:
+            # The process is going away, not the cameras: sessions stay open to be resumed.
+            # Workers already retiring keep the stop they were given.
+            worker.stop(detach=True)
+        workers = [*running, *self._retiring]
         await asyncio.gather(*(asyncio.to_thread(worker.join, join_timeout) for worker in workers))
         logger.info("Camera workers stopped", extra={"count": len(workers)})
 

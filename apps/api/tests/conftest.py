@@ -1,11 +1,15 @@
-from collections.abc import AsyncIterator, Callable, Sequence
+import asyncio
+import contextlib
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Sequence
 from pathlib import Path
+from typing import Any
 
 import cv2
 import httpx
 import numpy as np
 import pytest
 import supervision as sv
+import uvicorn
 from fastapi import FastAPI
 from numpy.typing import NDArray
 
@@ -16,6 +20,13 @@ from yardlens_api.services.detector import COCO_CLASSES, DetectorStatus
 
 type Frame = NDArray[np.uint8]
 type DetectionScript = Callable[[int], sv.Detections]
+
+# Test-only credentials for the administrator the app creates on startup.
+ADMIN_USERNAME = "admin"
+ADMIN_PASSWORD = "test-password-1234"
+ORIGIN = "http://localhost:3100"
+# What the dashboard sends with every request: the CSRF header from an allowed origin.
+BROWSER_HEADERS = {"X-YardLens-Request": "1", "Origin": ORIGIN}
 
 
 def make_detections(
@@ -96,7 +107,10 @@ def settings(tmp_path: Path) -> Settings:
         data_dir=tmp_path / "data",
         database_url=f"sqlite+aiosqlite:///{tmp_path / 'test.db'}",
         workers_enabled=True,
-        cors_origins=["http://localhost:3100"],
+        cors_origins=[ORIGIN],
+        public_url=ORIGIN,
+        admin_username=ADMIN_USERNAME,
+        admin_password=ADMIN_PASSWORD,
     )
 
 
@@ -124,8 +138,56 @@ def container(app: FastAPI) -> Container:
     return value
 
 
+async def login(http: httpx.AsyncClient, password: str = ADMIN_PASSWORD) -> httpx.Response:
+    response = await http.post(
+        "/api/auth/login", json={"username": ADMIN_USERNAME, "password": password}
+    )
+    assert response.status_code == 200, response.text
+    return response
+
+
+def browser(app: FastAPI) -> httpx.AsyncClient:
+    """A client that behaves like the dashboard: CSRF header, allowed origin, cookie jar."""
+    transport = httpx.ASGITransport(app=app)
+    return httpx.AsyncClient(
+        transport=transport, base_url="http://testserver", headers=BROWSER_HEADERS
+    )
+
+
 @pytest.fixture
 async def client(app: FastAPI) -> AsyncIterator[httpx.AsyncClient]:
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as http:
+    """Signed in as the administrator."""
+    async with browser(app) as http:
+        await login(http)
         yield http
+
+
+@pytest.fixture
+async def anon_client(app: FastAPI) -> AsyncIterator[httpx.AsyncClient]:
+    """Not signed in."""
+    async with browser(app) as http:
+        yield http
+
+
+@contextlib.asynccontextmanager
+async def serve(app: Any) -> AsyncGenerator[str]:
+    """Serve an ASGI app on a free local port (its lifespan is the caller's); yields its URL."""
+    instance = uvicorn.Server(
+        uvicorn.Config(app, host="127.0.0.1", port=0, lifespan="off", log_config=None)
+    )
+    task = asyncio.create_task(instance.serve())
+    for _ in range(500):
+        if instance.started:
+            break
+        await asyncio.sleep(0.01)
+    port: int = instance.servers[0].sockets[0].getsockname()[1]
+    yield f"http://127.0.0.1:{port}"
+    instance.should_exit = True
+    await task
+
+
+@pytest.fixture
+async def live_server(app: FastAPI) -> AsyncIterator[str]:
+    """The app over a real socket (WebSockets, workers); yields its http:// address."""
+    async with serve(app) as url:
+        yield url

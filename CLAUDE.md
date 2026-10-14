@@ -8,6 +8,9 @@
   `bun run dev` is running, `yardlens-api.exe` is locked and `uv` cannot sync: prefix commands
   with `UV_NO_SYNC=1`.
 - Commits go straight to `main`; there are no branch rules.
+- Docker, HTTPS, workers and the security model: [docs/deployment.md](docs/deployment.md). The
+  worker protocol is `apps/api/src/yardlens_api/schemas/worker_protocol.py`; placement, leases
+  and epochs are explained at the top of `services/cluster.py`.
 
 ## Pending work
 

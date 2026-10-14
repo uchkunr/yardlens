@@ -1,0 +1,99 @@
+# The YardLens server: database, API (which also processes cameras), dashboard and HTTPS.
+#
+#   cd deploy
+#   cp .env.example .env     # then fill it in
+#   docker compose up -d
+#
+# Open https://<PUBLIC_HOST>. Only Caddy is reachable from the network (ports 80 and 443).
+# With an NVIDIA GPU: YARDLENS_VARIANT=cuda in .env, and
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+name: yardlens
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: yardlens
+      POSTGRES_USER: yardlens
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U yardlens -d yardlens"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    shm_size: 256mb
+
+  api:
+    image: ${YARDLENS_IMAGE:-ghcr.io/uchkunr/yardlens}:${YARDLENS_VERSION:-0.1.0}-${YARDLENS_VARIANT:-cpu}
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+      args:
+        VARIANT: ${YARDLENS_VARIANT:-cpu}
+    restart: unless-stopped
+    # The schema is applied on every start (it is idempotent), then the API runs.
+    command: ["sh", "-c", "db-setup && exec yardlens-api"]
+    environment:
+      YARDLENS_DATABASE_URL: postgresql+asyncpg://yardlens:${POSTGRES_PASSWORD}@postgres:5432/yardlens
+      YARDLENS_PUBLIC_URL: https://${PUBLIC_HOST:?Set PUBLIC_HOST in .env}
+      YARDLENS_CORS_ORIGINS: https://localhost
+      # Only Caddy and the dashboard can reach the API, so their forwarding headers are trusted.
+      YARDLENS_FORWARDED_ALLOW_IPS: "*"
+      YARDLENS_ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      YARDLENS_ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env}
+      # Workers pin this certificate authority; the dashboard offers it for download.
+      YARDLENS_CA_CERT_PATH: /caddy/caddy/pki/authorities/local/root.crt
+      TZ: ${TZ:-UTC}
+    volumes:
+      # Snapshots, models, the token signing key: back this up with the database.
+      - api-data:/data
+      - caddy-data:/caddy:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen("http://127.0.0.1:8100/api/ping", timeout=3)
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 120s
+    stop_grace_period: 20s
+
+  web:
+    image: ${YARDLENS_WEB_IMAGE:-ghcr.io/uchkunr/yardlens-web}:${YARDLENS_VERSION:-0.1.0}
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - api
+
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - api
+      - web
+
+volumes:
+  postgres:
+  api-data:
+  caddy-data:
+  caddy-config:

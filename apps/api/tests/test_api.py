@@ -185,7 +185,7 @@ async def test_enabled_camera_streams_and_emits_events(
 
     disabled = await client.post(f"/api/cameras/{camera_id}/disable")
     assert disabled.json()["runtime"]["status"] == "disabled"
-    assert container.cameras.worker(camera_id) is None
+    assert container.cameras.live(camera_id) is None
 
 
 async def _insert_events(container: Container, video_file: Path) -> int:

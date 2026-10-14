@@ -102,6 +102,8 @@ class WorkerEvent:
     confidence: float | None = None
     snapshot_path: str | None = None
     details: dict[str, Any] | None = None
+    uid: str = field(default_factory=lambda: uuid.uuid4().hex)
+    """Saved once however often it is sent (a worker resends what was not acknowledged)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -205,6 +207,8 @@ class CameraWorker:
         self._limits: Callable[[], Limits] = limits or (lambda: fixed)
 
         self._stop = threading.Event()
+        # Set by stop(detach=True): leave an open loading session open instead of closing it.
+        self._detach = False
         self._frame_ready = threading.Condition()
         self._latest_frame: Frame | None = None
         self._latest_frame_time = 0.0
@@ -265,10 +269,22 @@ class CameraWorker:
         self._inference_thread.start()
         self._render_thread.start()
 
-    def stop(self) -> None:
+    def stop(self, *, detach: bool = False) -> None:
+        """Stop the threads. A camera being disabled or deleted closes its open loading session;
+        ``detach`` leaves it open instead, for whoever carries on with it (the API after a
+        restart, the worker a camera moves to)."""
+        self._detach = detach
         self._stop.set()
         with self._frame_ready:
             self._frame_ready.notify_all()
+
+    def handoff(self) -> InterruptedSession | None:
+        """The open loading session, for the worker that takes this camera over."""
+        with self._state_lock:
+            session = self._loading.session if self._loading else None
+        if session is None:
+            return None
+        return InterruptedSession(session, last_seen=datetime.now(UTC))
 
     def join(self, timeout: float) -> None:
         deadline = time.monotonic() + timeout
@@ -573,7 +589,8 @@ class CameraWorker:
                 )
                 fps = self._pacer.fps(now, self._limits())
             next_tick = max(next_tick + 1.0 / fps, now)
-        self._finish_loading()
+        if not self._detach:
+            self._finish_loading()
 
     def _is_stale(self) -> bool:
         return time.monotonic() - self._last_frame_monotonic > STALL_TIMEOUT_SECONDS

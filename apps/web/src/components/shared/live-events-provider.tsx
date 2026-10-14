@@ -11,6 +11,7 @@ import {
   type YardEvent,
 } from "@/lib/api/client";
 import { prependRecentEvent, queryKeys } from "@/lib/api/queries";
+import { refreshSession } from "@/lib/auth";
 
 type CameraStatusMessage = { camera_id: number; status: CameraStatus; last_error: string | null };
 
@@ -30,6 +31,10 @@ const LiveEventsContext = createContext<LiveEventsState>({
 
 const STATS_REFRESH_DELAY_MS = 3_000;
 const LOADING_REFRESH_DELAY_MS = 1_000;
+// A refused connection (an expired session, an API restart) is reopened after renewing the
+// session, sooner at first and less often while it keeps failing.
+const RECONNECT_FIRST_MS = 1_000;
+const RECONNECT_MAX_MS = 30_000;
 
 /** One app-wide SSE connection that keeps cached queries fresh as events arrive. */
 export function LiveEventsProvider({ children }: { children: ReactNode }) {
@@ -38,9 +43,12 @@ export function LiveEventsProvider({ children }: { children: ReactNode }) {
   const [unseenCount, setUnseenCount] = useState(0);
 
   useEffect(() => {
-    const source = new EventSource(EVENTS_STREAM_URL);
+    let source: EventSource | null = null;
     let statsTimer: ReturnType<typeof setTimeout> | undefined;
     let loadingTimer: ReturnType<typeof setTimeout> | undefined;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+    let failures = 0;
+    let closed = false;
 
     const refreshStatsSoon = () => {
       statsTimer ??= setTimeout(() => {
@@ -56,8 +64,10 @@ export function LiveEventsProvider({ children }: { children: ReactNode }) {
       }, LOADING_REFRESH_DELAY_MS);
     };
 
-    const onReady = () => setConnected(true);
-    const onError = () => setConnected(false);
+    const onReady = () => {
+      failures = 0;
+      setConnected(true);
+    };
 
     const onEvent = (message: MessageEvent<string>) => {
       const event = JSON.parse(message.data) as YardEvent;
@@ -96,15 +106,36 @@ export function LiveEventsProvider({ children }: { children: ReactNode }) {
       refreshLoadingSoon();
     };
 
-    source.addEventListener("ready", onReady);
-    source.addEventListener("error", onError);
-    source.addEventListener("event", onEvent);
-    source.addEventListener("camera_status", onStatus);
-    source.addEventListener("session", onSession);
+    const connect = () => {
+      // Credentials go along when the API is on another port (development).
+      const next = new EventSource(EVENTS_STREAM_URL, { withCredentials: true });
+      source = next;
+      next.addEventListener("ready", onReady);
+      next.addEventListener("event", onEvent);
+      next.addEventListener("camera_status", onStatus);
+      next.addEventListener("session", onSession);
+      next.addEventListener("error", () => {
+        setConnected(false);
+        // The browser retries dropped connections itself, but gives up on a refused one.
+        if (next.readyState !== EventSource.CLOSED || closed) return;
+        next.close();
+        failures += 1;
+        const delay = Math.min(RECONNECT_FIRST_MS * 2 ** (failures - 1), RECONNECT_MAX_MS);
+        reconnectTimer = setTimeout(() => {
+          void refreshSession().then(() => {
+            if (!closed) connect();
+          });
+        }, delay);
+      });
+    };
+
+    connect();
     return () => {
+      closed = true;
       clearTimeout(statsTimer);
       clearTimeout(loadingTimer);
-      source.close();
+      clearTimeout(reconnectTimer);
+      source?.close();
     };
   }, [queryClient]);
 

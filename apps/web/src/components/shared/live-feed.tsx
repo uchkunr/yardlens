@@ -15,13 +15,16 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { useI18n } from "@/i18n/provider";
 import { snapshotUrl, streamUrl, type CameraStatus } from "@/lib/api/client";
+import { refreshSession } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
 /**
  * Browsers allow ~6 concurrent HTTP/1.1 connections per origin. MJPEG streams hold a
  * connection open, so only a few visible feeds stream at once; the rest refresh snapshots.
+ * Over HTTPS (Caddy speaks HTTP/2) the streams share one connection and more of them fit.
  */
-const MAX_STREAMS = 4;
+const MAX_STREAMS_HTTP1 = 4;
+const MAX_STREAMS_HTTP2 = 12;
 const SNAPSHOT_REFRESH_MS = 1_000;
 // After a stream drops (API restart, network blip) snapshots fill in, then the stream is tried
 // again: soon at first, less often while it keeps failing.
@@ -29,6 +32,8 @@ const RETRY_FIRST_MS = 2_000;
 const RETRY_MAX_MS = 30_000;
 
 class StreamSlots {
+  private readonly limit =
+    typeof window !== "undefined" && window.location.protocol === "https:" ? MAX_STREAMS_HTTP2 : MAX_STREAMS_HTTP1;
   private holders: string[] = [];
   private listeners = new Set<() => void>();
   private version = 0;
@@ -54,7 +59,7 @@ class StreamSlots {
 
   granted(key: string) {
     const index = this.holders.indexOf(key);
-    return index >= 0 && index < MAX_STREAMS;
+    return index >= 0 && index < this.limit;
   }
 
   private emit() {
@@ -144,23 +149,18 @@ function MjpegStream({
   onFailure: () => void;
 }) {
   const ref = useRef<HTMLImageElement>(null);
+  const url = streamUrl(cameraId, attempt);
   useEffect(() => {
     const image = ref.current;
-    // Clearing src aborts the long-lived request immediately when the feed unmounts.
-    return () => {
-      if (image) image.src = "";
-    };
-  }, []);
+    if (!image) return;
+    image.src = url;
+    // Removing src aborts the long-lived request at once when the feed goes away. Unlike setting
+    // it to "", it fires no error, and the src is set again on every mount: React's development
+    // mode unmounts and remounts each effect once, which used to leave the feed on snapshots.
+    return () => image.removeAttribute("src");
+  }, [url]);
   return (
-    <img
-      ref={ref}
-      src={streamUrl(cameraId, attempt)}
-      alt={alt}
-      className={className}
-      onLoad={onFrame}
-      onError={onFailure}
-      draggable={false}
-    />
+    <img ref={ref} alt={alt} className={className} onLoad={onFrame} onError={onFailure} draggable={false} />
   );
 }
 
@@ -198,6 +198,8 @@ function useStreamRetry(online: boolean) {
     onFailure: () => {
       setFailures((value) => value + 1);
       setWaiting(true);
+      // The stream may have been refused for an expired session: renew it before retrying.
+      void refreshSession();
     },
   };
 }

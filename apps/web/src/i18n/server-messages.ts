@@ -12,6 +12,15 @@ const RU_RULES: Rule[] = [
   [/^Event (\d+) not found$/, (id) => `Событие ${id} не найдено`],
   [/^A camera with this name already exists$/, () => "Камера с таким названием уже есть"],
   [/^Camera is disabled$/, () => "Камера отключена"],
+  [/^Worker (\d+) not found$/, () => "Воркер не найден"],
+  [/^A worker with this name already exists$/, () => "Воркер с таким названием уже есть"],
+  [/^No worker is available to process this camera$/, () => "Нет свободного узла, чтобы обработать эту камеру"],
+  [/^The worker processing this camera is offline$/, () => "Воркер, который обрабатывает эту камеру, не в сети"],
+  [
+    /^Video files are processed on this server, and its processing is off$/,
+    () => "Видеофайлы обрабатываются только на этом сервере, а обработка на нём выключена",
+  ],
+  [/^Video files are processed on the server$/, () => "Видеофайлы обрабатываются на сервере"],
   [/^No frame received yet$/, () => "Кадров пока нет"],
   [/^Connection successful$/, () => "Подключение установлено"],
   [/^Connected, but no frame was received$/, () => "Подключились, но кадр не пришёл"],
@@ -53,6 +62,15 @@ const RU_RULES: Rule[] = [
     () => "Груз нужно выбрать среди распознаваемых классов",
   ],
   [/^Main stream: ([\s\S]+)$/, (reason) => `Основной поток: ${translateServerMessage(reason, "ru")}`],
+  [/^Wrong username or password$/, () => "Неверное имя пользователя или пароль"],
+  [/^Too many attempts; try again in (\d+) s$/, (seconds) => `Слишком много попыток. Попробуйте через ${seconds} с`],
+  [/^Not signed in$/, () => "Вы не вошли в систему"],
+  [/^Session expired$/, () => "Сеанс истёк, войдите снова"],
+  [/^Current password is wrong$/, () => "Текущий пароль указан неверно"],
+  [/^Password must be at least (\d+) characters$/, (count) => `Пароль должен быть не короче ${count} символов`],
+  [/^Password must be at most (\d+) characters$/, (count) => `Пароль должен быть не длиннее ${count} символов`],
+  [/^Password must differ from the username$/, () => "Пароль не должен совпадать с именем пользователя"],
+  [/^Cross-site request refused$/, () => "Запрос отклонён: он пришёл не со страницы YardLens"],
 ];
 
 export function translateServerMessage(message: string, locale: Locale): string {

@@ -240,6 +240,7 @@ function LoadMonitor({ data }: { data: SystemResources }) {
 function CameraLoad({ data }: { data: SystemResources }) {
   const { t, f } = useI18n();
   const m = t.load;
+  const distributed = data.cameras.some((camera) => camera.worker_id !== null && camera.worker_id !== undefined);
   return (
     <Card className="gap-0 overflow-hidden pb-0">
       <CardHeader className="pb-4">
@@ -253,6 +254,7 @@ function CameraLoad({ data }: { data: SystemResources }) {
           <TableHeader>
             <TableRow>
               <TableHead className="pl-6">{m.camera}</TableHead>
+              {distributed ? <TableHead className="hidden md:table-cell">{t.workers.node}</TableHead> : null}
               <TableHead>{m.mode}</TableHead>
               <TableHead className="text-right">{m.rate}</TableHead>
               <TableHead className="hidden pr-6 sm:table-cell">{m.decoding}</TableHead>
@@ -262,6 +264,11 @@ function CameraLoad({ data }: { data: SystemResources }) {
             {data.cameras.map((camera) => (
               <TableRow key={camera.id}>
                 <TableCell className="max-w-48 truncate pl-6 font-medium">{camera.name}</TableCell>
+                {distributed ? (
+                  <TableCell className="text-muted-foreground hidden max-w-40 truncate md:table-cell">
+                    {camera.worker_name ?? t.workers.thisServer}
+                  </TableCell>
+                ) : null}
                 <TableCell>
                   <span className="flex items-center gap-2">
                     <span className={cn("size-2 shrink-0 rounded-full", ACTIVITY_DOT[camera.activity])} aria-hidden />

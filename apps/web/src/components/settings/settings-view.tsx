@@ -7,6 +7,7 @@ import { DetectionSettings } from "@/components/settings/detection-settings";
 import { IntegrationsSettings } from "@/components/settings/integrations-settings";
 import { LoadSettings } from "@/components/settings/load-settings";
 import { SystemSettings } from "@/components/settings/system-settings";
+import { WorkersSettings } from "@/components/settings/workers-settings";
 import { PageHeader } from "@/components/shared/page-header";
 import { ErrorState } from "@/components/shared/states";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -15,7 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useI18n } from "@/i18n/provider";
 import { useSettings } from "@/lib/api/queries";
 
-const TABS = ["cameras", "detection", "integrations", "load", "system"] as const;
+const TABS = ["cameras", "detection", "integrations", "load", "workers", "system"] as const;
 
 type Tab = (typeof TABS)[number];
 
@@ -83,6 +84,9 @@ export function SettingsView() {
           {settingsPanel((data) => <IntegrationsSettings settings={data} />)}
         </TabsContent>
         <TabsContent value="load">{settingsPanel((data) => <LoadSettings settings={data} />)}</TabsContent>
+        <TabsContent value="workers">
+          <WorkersSettings />
+        </TabsContent>
         <TabsContent value="system">
           <SystemSettings />
         </TabsContent>

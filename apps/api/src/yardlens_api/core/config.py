@@ -27,6 +27,21 @@ class Settings(BaseSettings):
     cors_origins: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["http://localhost:3100", "http://127.0.0.1:3100"]
     )
+    # The address people open the dashboard at. HTTPS here makes auth cookies Secure; its
+    # origin is also allowed to make requests, and worker commands point to it.
+    public_url: str = "http://localhost:3100"
+    # Proxies whose X-Forwarded-* headers are trusted (Caddy). Comma-separated, or "*".
+    forwarded_allow_ips: str = "127.0.0.1"
+
+    # Signing key for access tokens; generated once into the data directory when unset.
+    auth_secret: str | None = None
+    access_token_minutes: int = Field(default=15, ge=1, le=60)
+    # Refresh tokens slide: every visit renews them, so a user who comes back within this many
+    # days is never signed out. 400 is the longest browsers keep a cookie.
+    refresh_token_days: int = Field(default=400, ge=1, le=400)
+    # Creates the admin on startup when there is none yet (Docker, tests).
+    admin_username: str | None = None
+    admin_password: str | None = None
 
     default_model: str = "yolo26n.pt"
     # auto | cpu | cuda:0 | mps | intel:cpu | intel:gpu
@@ -39,7 +54,15 @@ class Settings(BaseSettings):
     hardware_decode: bool = True
     # Run below normal priority so the OS, database and web app stay responsive under load.
     low_priority: bool = True
+    # False: this server never processes cameras itself, whatever the dashboard says.
     workers_enabled: bool = True
+
+    # Workers: the image the dashboard's start command uses, the address workers reach this
+    # server at (defaults to public_url), and the certificate authority behind its HTTPS, whose
+    # fingerprint workers pin (Caddy's internal CA in Docker).
+    worker_image: str = "ghcr.io/uchkunr/yardlens"
+    worker_server_url: str | None = None
+    ca_cert_path: Path | None = None
 
     stream_jpeg_quality: int = Field(default=80, ge=30, le=95)
     snapshot_max_width: int = Field(default=960, ge=320)

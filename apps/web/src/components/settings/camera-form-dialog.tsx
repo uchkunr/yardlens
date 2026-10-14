@@ -24,7 +24,7 @@ import { Switch } from "@/components/ui/switch";
 import type { Messages } from "@/i18n/messages";
 import { useI18n } from "@/i18n/provider";
 import type { Camera } from "@/lib/api/client";
-import { useCreateCamera, useTestCamera, useUpdateCamera } from "@/lib/api/queries";
+import { useCreateCamera, useTestCamera, useUpdateCamera, useWorkers } from "@/lib/api/queries";
 import { SOURCE_TYPES, SOURCE_URL_PLACEHOLDERS } from "@/lib/format";
 
 function cameraSchema(t: Messages) {
@@ -40,6 +40,8 @@ function cameraSchema(t: Messages) {
       .max(2048)
       .refine((value) => value === "" || /^rtsps?:\/\/./i.test(value), m.plateUrlInvalid),
     enabled: z.boolean(),
+    // "auto", or a worker's id: Select values are strings.
+    placement: z.string(),
   });
 }
 
@@ -52,6 +54,7 @@ const DEFAULTS: CameraFormValues = {
   inference_fps: 3,
   plate_url: "",
   enabled: true,
+  placement: "auto",
 };
 
 export function CameraFormDialog({
@@ -66,6 +69,7 @@ export function CameraFormDialog({
 }) {
   const createCamera = useCreateCamera();
   const updateCamera = useUpdateCamera();
+  const workers = useWorkers(open);
   const testCamera = useTestCamera();
   const { t, f } = useI18n();
   const m = t.cameraForm;
@@ -86,6 +90,7 @@ export function CameraFormDialog({
             inference_fps: camera.inference_fps,
             plate_url: camera.plate_url ?? "",
             enabled: camera.enabled,
+            placement: camera.worker_id ? String(camera.worker_id) : "auto",
           }
         : DEFAULTS,
     );
@@ -96,18 +101,25 @@ export function CameraFormDialog({
     const valid = await form.trigger(["source_type", "url"]);
     if (!valid) return;
     const { source_type, url } = form.getValues();
-    testCamera.mutate({ source_type, url });
+    testCamera.mutate({ source_type, url, camera_id: camera?.id });
   };
 
   const onSubmit = form.handleSubmit((values) => {
     const done = { onSuccess: () => onOpenChange(false) };
-    // Only RTSP cameras have a separate main stream.
-    const body = { ...values, plate_url: values.source_type === "rtsp" && values.plate_url ? values.plate_url : null };
+    const { placement, ...fields } = values;
+    const body = {
+      ...fields,
+      // Only RTSP cameras have a separate main stream.
+      plate_url: fields.source_type === "rtsp" && fields.plate_url ? fields.plate_url : null,
+      // Video files always run on the server.
+      worker_id: placement !== "auto" && fields.source_type !== "file" ? Number(placement) : null,
+    };
     if (camera) updateCamera.mutate({ id: camera.id, body }, done);
     else createCamera.mutate(body, done);
   });
 
   const saving = createCamera.isPending || updateCamera.isPending;
+  const workerOptions = workers.data?.workers ?? [];
   const result = testCamera.data;
 
   return (
@@ -188,6 +200,38 @@ export function CameraFormDialog({
                 />
                 <FieldDescription>{m.plateUrlHint}</FieldDescription>
                 <FieldError errors={[form.formState.errors.plate_url]} />
+              </Field>
+            ) : null}
+
+            {workerOptions.length > 0 || form.getValues("placement") !== "auto" ? (
+              <Field>
+                <FieldLabel htmlFor="camera-placement">{t.workers.placement}</FieldLabel>
+                {sourceType === "file" ? (
+                  <FieldDescription>{t.workers.fileOnServer}</FieldDescription>
+                ) : (
+                  <>
+                    <Controller
+                      control={form.control}
+                      name="placement"
+                      render={({ field }) => (
+                        <Select value={field.value} onValueChange={field.onChange}>
+                          <SelectTrigger id="camera-placement" className="w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="auto">{t.workers.automatic}</SelectItem>
+                            {workerOptions.map((worker) => (
+                              <SelectItem key={worker.id} value={String(worker.id)}>
+                                {worker.online ? worker.name : `${worker.name} (${t.workers.offline})`}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                    />
+                    <FieldDescription>{t.workers.placementHint}</FieldDescription>
+                  </>
+                )}
               </Field>
             ) : null}
 

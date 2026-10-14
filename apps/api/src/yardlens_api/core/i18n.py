@@ -88,6 +88,11 @@ EXPORT_LABELS: dict[Language, dict[str, str]] = {
     },
 }
 
+LOGIN_ALERT: dict[Language, str] = {
+    "ru": "⚠️ YardLens: много неудачных попыток входа. Адрес: {address}.",
+    "en": "⚠️ YardLens: many failed sign-in attempts. Address: {address}.",
+}
+
 TEST_MESSAGE: dict[Language, str] = {
     "ru": "✅ Тестовое сообщение YardLens: уведомления работают.",
     "en": "✅ YardLens test message: notifications are working.",

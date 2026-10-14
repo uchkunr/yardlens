@@ -53,6 +53,25 @@ class ResourcePlan:
     plate_threads: int
 
 
+def container_cpu_limit(root: Path = Path("/sys/fs/cgroup")) -> float | None:
+    """CPUs a container may use (``docker run --cpus``), or ``None`` when unlimited. Reads
+    cgroup v2's ``cpu.max``, else v1's CFS quota."""
+    try:
+        quota, period = (root / "cpu.max").read_text().split()[:2]
+        if quota != "max":
+            return int(quota) / int(period)
+    except OSError, ValueError:
+        pass
+    try:
+        quota = (root / "cpu" / "cpu.cfs_quota_us").read_text().strip()
+        period = (root / "cpu" / "cpu.cfs_period_us").read_text().strip()
+        if int(quota) > 0:
+            return int(quota) / int(period)
+    except OSError, ValueError:
+        pass
+    return None
+
+
 def plan_resources(
     *, inference_threads: int = 0, logical: int | None = None, physical: int | None = None
 ) -> ResourcePlan:

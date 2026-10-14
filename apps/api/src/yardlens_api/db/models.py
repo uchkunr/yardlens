@@ -17,8 +17,8 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.types import TypeDecorator
 
-# The canonical PostgreSQL schema lives in db/schema.sql (applied by db-setup). These mappings match
-# it; ``metadata.create_all`` is only used for SQLite (tests and quick local runs).
+# The canonical PostgreSQL schema is schema.sql next to this file (applied by db-setup). These
+# mappings match it; ``metadata.create_all`` is only used for SQLite (tests and quick local runs).
 JsonType = JSON().with_variant(JSONB(), "postgresql")
 
 
@@ -67,6 +67,10 @@ class Camera(Base):
     zone: Mapped[dict[str, Any] | None] = mapped_column(default=None)
     plate_url: Mapped[str | None] = mapped_column(String(2048), default=None)
     detection: Mapped[dict[str, Any] | None] = mapped_column(default=None)
+    # Pinned to this worker; None places the camera automatically.
+    worker_id: Mapped[int | None] = mapped_column(
+        ForeignKey("workers.id", ondelete="SET NULL"), default=None
+    )
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
 
@@ -84,6 +88,7 @@ class Event(Base):
         Index("ix_events_created_at", "created_at"),
         Index("ix_events_camera_created", "camera_id", "created_at"),
         Index("ix_events_type_created", "type", "created_at"),
+        Index("uq_events_uid", "uid", unique=True),
     )
 
     id: Mapped[int] = mapped_column(
@@ -97,6 +102,7 @@ class Event(Base):
     snapshot_path: Mapped[str | None] = mapped_column(String(512), default=None)
     details: Mapped[dict[str, Any] | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    uid: Mapped[str | None] = mapped_column(String(32), default=None)
 
     camera: Mapped[Camera] = relationship(back_populates="events")
 
@@ -140,3 +146,64 @@ class AppSetting(Base):
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     value: Mapped[dict[str, Any]] = mapped_column()
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    username: Mapped[str] = mapped_column(String(64), unique=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    password_changed_at: Mapped[datetime] = mapped_column(default=utcnow)
+    last_login_at: Mapped[datetime | None] = mapped_column(default=None)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class RefreshToken(Base):
+    __tablename__ = "refresh_tokens"
+    __table_args__ = (
+        Index("ix_refresh_tokens_family", "family_id"),
+        Index("ix_refresh_tokens_user", "user_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    family_id: Mapped[str] = mapped_column(String(32))
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    expires_at: Mapped[datetime]
+    last_used_at: Mapped[datetime | None] = mapped_column(default=None)
+    rotated_at: Mapped[datetime | None] = mapped_column(default=None)
+    revoked_at: Mapped[datetime | None] = mapped_column(default=None)
+    user_agent: Mapped[str | None] = mapped_column(String(256), default=None)
+    ip: Mapped[str | None] = mapped_column(String(64), default=None)
+
+
+class Worker(Base):
+    """An analysis node on another machine."""
+
+    __tablename__ = "workers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(64), unique=True)
+    token_hash: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    last_seen_at: Mapped[datetime | None] = mapped_column(default=None)
+    address: Mapped[str | None] = mapped_column(String(64), default=None)
+    version: Mapped[str | None] = mapped_column(String(32), default=None)
+    info: Mapped[dict[str, Any] | None] = mapped_column(default=None)
+
+
+class CameraAssignment(Base):
+    """The node a camera runs on: a worker, or this server (``worker_id`` None)."""
+
+    __tablename__ = "camera_assignments"
+
+    camera_id: Mapped[int] = mapped_column(
+        ForeignKey("cameras.id", ondelete="CASCADE"), primary_key=True
+    )
+    worker_id: Mapped[int | None] = mapped_column(
+        ForeignKey("workers.id", ondelete="CASCADE"), default=None
+    )
+    epoch: Mapped[int] = mapped_column(BigInteger)
+    assigned_at: Mapped[datetime] = mapped_column(default=utcnow)

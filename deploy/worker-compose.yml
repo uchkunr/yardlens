@@ -1,0 +1,36 @@
+# A worker as a Compose service, instead of the `docker run` command from Settings > Workers.
+# Put the values from that command into a .env file next to this one:
+#
+#   YARDLENS_SERVER=https://192.168.1.10
+#   YARDLENS_WORKER_TOKEN=ylw_...
+#   YARDLENS_CA_PIN=...
+#   YARDLENS_VERSION=0.1.0
+#   YARDLENS_VARIANT=cpu        # or cuda, and uncomment the GPU lines below
+#
+#   docker compose -f worker-compose.yml up -d
+name: yardlens-worker
+
+services:
+  worker:
+    image: ${YARDLENS_IMAGE:-ghcr.io/uchkunr/yardlens}:${YARDLENS_VERSION:-0.1.0}-${YARDLENS_VARIANT:-cpu}
+    restart: unless-stopped
+    environment:
+      YARDLENS_SERVER: ${YARDLENS_SERVER:?Set YARDLENS_SERVER in .env}
+      YARDLENS_WORKER_TOKEN: ${YARDLENS_WORKER_TOKEN:?Set YARDLENS_WORKER_TOKEN in .env}
+      YARDLENS_CA_PIN: ${YARDLENS_CA_PIN:-}
+      TZ: ${TZ:-UTC}
+    volumes:
+      # Models and photos waiting to be delivered.
+      - worker-data:/data
+    stop_grace_period: 20s
+    # NVIDIA GPU:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+volumes:
+  worker-data:

@@ -81,6 +81,7 @@ async def update_settings(
             raise InvalidSettingsError(problem)
         await store.save_detection(session, detection)
         container.models.retain(container.cameras.models_in_use() - {detection.model})
+        container.cameras.push_settings()
 
     if payload.telegram is not None:
         current = store.telegram()
@@ -95,6 +96,7 @@ async def update_settings(
     if payload.performance is not None:
         await store.save_performance(session, payload.performance)
         container.monitor.refresh()
+        container.cameras.push_settings()
 
     return _read(container)
 

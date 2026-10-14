@@ -6,6 +6,7 @@ from fastapi import APIRouter, Request, Response
 from fastapi.responses import StreamingResponse
 
 from yardlens_api.api.deps import ContainerDep, SessionDep
+from yardlens_api.api.security import UserDep
 from yardlens_api.core.enums import CameraStatus
 from yardlens_api.core.errors import NotFoundError, UnavailableError
 from yardlens_api.db.models import Camera
@@ -32,16 +33,19 @@ async def _require_camera(session: SessionDep, camera_id: int) -> Camera:
     responses={200: {"content": {f"multipart/x-mixed-replace; boundary={_BOUNDARY}": {}}}},
 )
 async def stream_mjpeg(
-    camera_id: int, request: Request, container: ContainerDep, session: SessionDep
+    camera_id: int, request: Request, container: ContainerDep, session: SessionDep, user: UserDep
 ) -> StreamingResponse:
-    """Annotated live feed as MJPEG. Frames are pushed as soon as inference produces them."""
+    """Annotated live feed as MJPEG. Frames are pushed as soon as inference produces them.
+    Ends as soon as the session it was opened with is signed out."""
     await _require_camera(session, camera_id)
     await session.close()
 
     async def frames() -> AsyncIterator[bytes]:
         last_seq = -1
         while not await request.is_disconnected():
-            worker = container.cameras.worker(camera_id)
+            if container.auth.is_revoked(user.family_id):
+                return
+            worker = container.cameras.live(camera_id)
             if worker is None:
                 await asyncio.sleep(1.0)
                 continue
@@ -76,11 +80,11 @@ async def snapshot(
 ) -> Response:
     """Latest annotated frame; ``?raw=true`` returns the unannotated frame (line editor)."""
     await _require_camera(session, camera_id)
-    worker = container.cameras.worker(camera_id)
+    worker = container.cameras.live(camera_id)
     if worker is None:
         raise UnavailableError("Camera is disabled")
     if raw:
-        jpeg = await asyncio.to_thread(worker.latest_raw_jpeg)
+        jpeg = await worker.raw_jpeg()
     else:
         _, jpeg = worker.latest_jpeg()
         # Rendering pauses while nobody watches; the request above restarts it, so an online

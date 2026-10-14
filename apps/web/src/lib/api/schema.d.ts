@@ -4,6 +4,139 @@
  */
 
 export interface paths {
+    "/api/auth/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Login */
+        post: operations["login_api_auth_login_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh
+         * @description Swap the refresh cookie for a new one and a fresh access token. Called on every visit.
+         */
+        post: operations["refresh_api_auth_refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Me */
+        get: operations["me_api_auth_me_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Logout */
+        post: operations["logout_api_auth_logout_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/logout-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Logout All
+         * @description Sign out on every device, this one included.
+         */
+        post: operations["logout_all_api_auth_logout_all_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Change Password
+         * @description Every other device is signed out; this one stays signed in.
+         */
+        post: operations["change_password_api_auth_password_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workers/ca.pem": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Certificate Authority
+         * @description The certificate authority behind this server's HTTPS. Public, like any CA certificate:
+         *     workers check it against the fingerprint in their command; people install it so browsers
+         *     trust the dashboard.
+         */
+        get: operations["certificate_authority_api_workers_ca_pem_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/health": {
         parameters: {
             query?: never;
@@ -142,6 +275,7 @@ export interface paths {
         /**
          * Stream Mjpeg
          * @description Annotated live feed as MJPEG. Frames are pushed as soon as inference produces them.
+         *     Ends as soon as the session it was opened with is signed out.
          */
         get: operations["stream_mjpeg_api_cameras__camera_id__stream_mjpeg_get"];
         put?: never;
@@ -199,6 +333,7 @@ export interface paths {
         /**
          * Stream Events
          * @description Server-sent events: ``event`` (a new EventRead), ``camera_status`` and ``session``.
+         *     Ends as soon as the session it was opened with is signed out.
          */
         get: operations["stream_events_api_events_stream_get"];
         put?: never;
@@ -382,6 +517,92 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Workers
+         * @description Every worker with its load and cameras, and what this server processes itself.
+         */
+        get: operations["list_workers_api_workers_get"];
+        put?: never;
+        /**
+         * Create Worker
+         * @description Add a worker. The token, and the commands carrying it, are shown this once.
+         */
+        post: operations["create_worker_api_workers_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workers/{worker_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Worker
+         * @description Remove a worker: its token stops working at once and its cameras move elsewhere.
+         */
+        delete: operations["delete_worker_api_workers__worker_id__delete"];
+        options?: never;
+        head?: never;
+        /** Rename Worker */
+        patch: operations["rename_worker_api_workers__worker_id__patch"];
+        trace?: never;
+    };
+    "/api/workers/rebalance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rebalance
+         * @description Spread the automatically placed cameras evenly over the nodes online now. Cameras that
+         *     move start over (tracking, an open loading session carries on).
+         */
+        post: operations["rebalance_api_workers_rebalance_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workers/local": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Local Processing
+         * @description Whether this server processes cameras too, or leaves them all to the workers.
+         */
+        put: operations["set_local_processing_api_workers_local_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -392,6 +613,16 @@ export interface components {
          * @enum {string}
          */
         Activity: "active" | "standby" | "idle";
+        /** AuthState */
+        AuthState: {
+            user: components["schemas"]["UserRead"];
+            /**
+             * Access Expires At
+             * Format: date-time
+             * @description Refresh before this; the refresh cookie is renewed on every refresh
+             */
+            access_expires_at: string;
+        };
         /** CameraCount */
         CameraCount: {
             /** Camera Id */
@@ -430,6 +661,11 @@ export interface components {
              */
             plate_url?: string | null;
             detection?: components["schemas"]["CameraDetection"] | null;
+            /**
+             * Worker Id
+             * @description Process the camera on this worker only; null places it automatically (video files always run on the server)
+             */
+            worker_id?: number | null;
         };
         /**
          * CameraDetection
@@ -463,6 +699,26 @@ export interface components {
             max_fps: number;
             /** Hardware Decoding */
             hardware_decoding: boolean;
+            /**
+             * Worker Id
+             * @description The worker it runs on; None: here
+             */
+            worker_id?: number | null;
+            /** Worker Name */
+            worker_name?: string | null;
+        };
+        /**
+         * CameraNode
+         * @description Where a camera is processed right now.
+         */
+        CameraNode: {
+            /**
+             * Worker Id
+             * @description None: this server
+             */
+            worker_id: number | null;
+            /** Worker Name */
+            worker_name?: string | null;
         };
         /** CameraRead */
         CameraRead: {
@@ -482,6 +738,13 @@ export interface components {
             /** Plate Url */
             plate_url: string | null;
             detection: components["schemas"]["CameraDetection"] | null;
+            /**
+             * Worker Id
+             * @description The worker it is pinned to; null: automatic
+             */
+            worker_id: number | null;
+            /** @description Where it runs now; null: nowhere (disabled, or waiting for a node) */
+            node: components["schemas"]["CameraNode"] | null;
             /**
              * Created At
              * Format: date-time
@@ -561,6 +824,11 @@ export interface components {
             /** Url */
             url: string;
             /**
+             * Camera Id
+             * @description The camera being edited: its stored password replaces a masked one in url
+             */
+            camera_id?: number | null;
+            /**
              * Timeout Seconds
              * @default 15
              */
@@ -609,6 +877,11 @@ export interface components {
             plate_url?: string | null;
             /** @description The camera's own detection settings; null follows the general */
             detection?: components["schemas"]["CameraDetection"] | null;
+            /**
+             * Worker Id
+             * @description Process the camera on this worker only; null places it automatically (video files always run on the server)
+             */
+            worker_id?: number | null;
         };
         /** ClassCount */
         ClassCount: {
@@ -616,6 +889,26 @@ export interface components {
             class_name: string;
             /** Count */
             count: number;
+        };
+        /** ClusterRead */
+        ClusterRead: {
+            /**
+             * Local Processing
+             * @description This server processes cameras as well
+             */
+            local_processing: boolean;
+            /**
+             * Local Cameras
+             * @description Cameras this server processes
+             */
+            local_cameras: number[];
+            /**
+             * Unplaced Cameras
+             * @description Enabled cameras no node can take right now
+             */
+            unplaced_cameras: number[];
+            /** Workers */
+            workers: components["schemas"]["WorkerRead"][];
         };
         /**
          * CountingLine
@@ -988,6 +1281,18 @@ export interface components {
             /** Points */
             points: components["schemas"]["ZonePoint"][];
         };
+        /** LocalProcessingUpdate */
+        LocalProcessingUpdate: {
+            /** Enabled */
+            enabled: boolean;
+        };
+        /** LoginRequest */
+        LoginRequest: {
+            /** Username */
+            username: string;
+            /** Password */
+            password: string;
+        };
         /** MemoryInfo */
         MemoryInfo: {
             /** Percent */
@@ -1001,6 +1306,40 @@ export interface components {
              * @description Resident memory of the YardLens API
              */
             process_bytes: number;
+        };
+        /**
+         * NodeLoad
+         * @description A node's latest resource sample.
+         */
+        NodeLoad: {
+            /** Cpu Percent */
+            cpu_percent: number;
+            /** Process Cpu Percent */
+            process_cpu_percent: number;
+            /** Memory Percent */
+            memory_percent: number;
+            /** Gpu Percent */
+            gpu_percent?: number | null;
+            /** Detector Busy Percent */
+            detector_busy_percent: number;
+            /** Disk Free Bytes */
+            disk_free_bytes?: number | null;
+            level: components["schemas"]["LoadLevelName"];
+            /** Model */
+            model: string;
+            /**
+             * Optimizing
+             * @description Preparing an OpenVINO copy of the model
+             * @default false
+             */
+            optimizing: boolean;
+        };
+        /** PasswordChange */
+        PasswordChange: {
+            /** Current Password */
+            current_password: string;
+            /** New Password */
+            new_password: string;
         };
         /** PerformanceSettings */
         PerformanceSettings: {
@@ -1173,6 +1512,13 @@ export interface components {
             /** Message */
             message: string;
         };
+        /** UserRead */
+        UserRead: {
+            /** Username */
+            username: string;
+            /** Last Login At */
+            last_login_at: string | null;
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -1185,6 +1531,107 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /**
+         * WorkerCommands
+         * @description Ready-made commands that start the worker on another machine.
+         */
+        WorkerCommands: {
+            /** Cpu */
+            cpu: string;
+            /**
+             * Gpu
+             * @description For machines with an NVIDIA GPU
+             */
+            gpu: string;
+        };
+        /** WorkerCreate */
+        WorkerCreate: {
+            /** Name */
+            name: string;
+        };
+        /** WorkerCreated */
+        WorkerCreated: {
+            worker: components["schemas"]["WorkerRead"];
+            /**
+             * Token
+             * @description Shown once: only its hash is stored
+             */
+            token: string;
+            commands: components["schemas"]["WorkerCommands"];
+        };
+        /**
+         * WorkerInfo
+         * @description The worker's machine, as it reports it on connecting.
+         */
+        WorkerInfo: {
+            /** Hostname */
+            hostname: string;
+            /** Platform */
+            platform: string;
+            /** Version */
+            version: string;
+            /** Logical Cpus */
+            logical_cpus: number;
+            /** Physical Cores */
+            physical_cores: number;
+            /**
+             * Cpu Limit
+             * @description CPUs the worker's container may use, when it is limited
+             */
+            cpu_limit?: number | null;
+            /** Memory Total Bytes */
+            memory_total_bytes: number;
+            /** Gpu */
+            gpu?: string | null;
+            /**
+             * Backend
+             * @description pytorch or openvino
+             */
+            backend: string;
+            /** Device */
+            device: string;
+        };
+        /** WorkerRead */
+        WorkerRead: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Online */
+            online: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Last Seen At
+             * @description Now while online; when it left otherwise
+             */
+            last_seen_at: string | null;
+            /** Address */
+            address: string | null;
+            /** Version */
+            version: string | null;
+            /** @description None until it has connected once */
+            info: components["schemas"]["WorkerInfo"] | null;
+            /**
+             * Clock Offset Seconds
+             * @description How far the worker's clock is behind the server's (negative: ahead); None while offline. Its times are corrected by this much.
+             */
+            clock_offset_seconds: number | null;
+            load: components["schemas"]["NodeLoad"] | null;
+            /**
+             * Cameras
+             * @description Cameras this worker processes
+             */
+            cameras: number[];
+        };
+        /** WorkerUpdate */
+        WorkerUpdate: {
+            /** Name */
+            name: string;
         };
         /** ZonePoint */
         ZonePoint: {
@@ -1202,6 +1649,166 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    login_api_auth_login_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoginRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthState"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_api_auth_refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthState"];
+                };
+            };
+        };
+    };
+    me_api_auth_me_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthState"];
+                };
+            };
+        };
+    };
+    logout_api_auth_logout_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    logout_all_api_auth_logout_all_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    change_password_api_auth_password_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordChange"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    certificate_authority_api_workers_ca_pem_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/x-pem-file": unknown;
+                };
+            };
+        };
+    };
     health_api_health_get: {
         parameters: {
             query?: never;
@@ -1949,6 +2556,176 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TelegramTestResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_workers_api_workers_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClusterRead"];
+                };
+            };
+        };
+    };
+    create_worker_api_workers_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkerCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkerCreated"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_worker_api_workers__worker_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                worker_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rename_worker_api_workers__worker_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                worker_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkerUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkerRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rebalance_api_workers_rebalance_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClusterRead"];
+                };
+            };
+        };
+    };
+    set_local_processing_api_workers_local_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LocalProcessingUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClusterRead"];
                 };
             };
             /** @description Validation Error */

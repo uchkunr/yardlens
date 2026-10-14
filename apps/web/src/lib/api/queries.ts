@@ -18,6 +18,7 @@ import {
   type Camera,
   type CameraCreate,
   type CameraUpdate,
+  type Cluster,
   type EventPage,
   type EventType,
   type LoadingFilters,
@@ -48,6 +49,7 @@ export const queryKeys = {
   loading: ["loading"] as const,
   loadingSummary: (days: number) => ["loading", "summary", days] as const,
   loadingSessions: (filters: LoadingSessionFilters) => ["loading", "sessions", filters] as const,
+  workers: ["workers"] as const,
 };
 
 export type LoadingSessionFilters = LoadingFilters & { page: number; pageSize: number };
@@ -293,7 +295,8 @@ export function useDeleteCamera() {
 export function useTestCamera() {
   const { t, f } = useI18n();
   return useMutation({
-    mutationFn: (body: { source_type: SourceType; url: string }) =>
+    // camera_id lets the API put the stored password back into a masked address.
+    mutationFn: (body: { source_type: SourceType; url: string; camera_id?: number }) =>
       unwrap(api.POST("/api/cameras/test", { body: { ...body, timeout_seconds: 15 } })),
     onError: (error) => toast.error(t.toasts.testFailed, { description: f.error(error) }),
   });
@@ -353,5 +356,99 @@ export function useModelClasses(model: string | undefined, enabled = true) {
       unwrap(api.GET("/api/settings/models/{model}/classes", { params: { path: { model: model ?? "" } } })),
     enabled: enabled && Boolean(model),
     staleTime: Infinity,
+  });
+}
+
+export function useChangePassword() {
+  const { t, f } = useI18n();
+  return useMutation({
+    mutationFn: (body: { current_password: string; new_password: string }) =>
+      unwrap(api.POST("/api/auth/password", { body })),
+    onSuccess: () => toast.success(t.auth.passwordChanged),
+    onError: (error) => toast.error(t.auth.passwordFailed, { description: f.error(error) }),
+  });
+}
+
+/** Workers with their load and cameras, and what this server processes; polled while open. */
+export function useWorkers(enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.workers,
+    queryFn: () => unwrap(api.GET("/api/workers")),
+    refetchInterval: 3_000,
+    enabled,
+  });
+}
+
+function useClusterMutation<T>(
+  request: (body: T) => Promise<Cluster>,
+  messages: { success?: string; failure: string },
+) {
+  const queryClient = useQueryClient();
+  const { f } = useI18n();
+  return useMutation({
+    mutationFn: request,
+    onSuccess: (cluster) => {
+      queryClient.setQueryData(queryKeys.workers, cluster);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.cameras });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.resources });
+      if (messages.success) toast.success(messages.success);
+    },
+    onError: (error) => toast.error(messages.failure, { description: f.error(error) }),
+  });
+}
+
+export function useLocalProcessing() {
+  const { t } = useI18n();
+  return useClusterMutation(
+    (enabled: boolean) => unwrap(api.PUT("/api/workers/local", { body: { enabled } })),
+    { success: t.workers.localSaved, failure: t.workers.localFailed },
+  );
+}
+
+export function useRebalance() {
+  const { t } = useI18n();
+  return useClusterMutation(() => unwrap(api.POST("/api/workers/rebalance")), {
+    success: t.workers.rebalanced,
+    failure: t.workers.rebalanceFailed,
+  });
+}
+
+export function useCreateWorker() {
+  const queryClient = useQueryClient();
+  const { t, f } = useI18n();
+  return useMutation({
+    mutationFn: (name: string) => unwrap(api.POST("/api/workers", { body: { name } })),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.workers }),
+    onError: (error) => toast.error(t.workers.createFailed, { description: f.error(error) }),
+  });
+}
+
+export function useRenameWorker() {
+  const queryClient = useQueryClient();
+  const { t, f } = useI18n();
+  return useMutation({
+    mutationFn: ({ id, name }: { id: number; name: string }) =>
+      unwrap(api.PATCH("/api/workers/{worker_id}", { params: { path: { worker_id: id } }, body: { name } })),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.workers });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.cameras });
+      toast.success(t.workers.renamed);
+    },
+    onError: (error) => toast.error(t.workers.renameFailed, { description: f.error(error) }),
+  });
+}
+
+export function useDeleteWorker() {
+  const queryClient = useQueryClient();
+  const { t, f } = useI18n();
+  return useMutation({
+    mutationFn: (id: number) =>
+      unwrap(api.DELETE("/api/workers/{worker_id}", { params: { path: { worker_id: id } } })),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.workers });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.cameras });
+      toast.success(t.workers.removed);
+    },
+    onError: (error) => toast.error(t.workers.removeFailed, { description: f.error(error) }),
   });
 }

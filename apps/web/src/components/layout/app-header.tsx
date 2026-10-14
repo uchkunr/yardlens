@@ -3,6 +3,7 @@
 import { usePathname } from "next/navigation";
 import { Suspense } from "react";
 
+import { UserMenu } from "@/components/auth/user-menu";
 import { NAV_ITEMS, isActivePath } from "@/components/layout/app-sidebar";
 import { LanguageSwitcher } from "@/components/layout/language-switcher";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
@@ -28,6 +29,7 @@ export function AppHeader() {
       <div className="ml-auto flex items-center gap-1">
         <LanguageSwitcher />
         <ThemeToggle />
+        <UserMenu />
       </div>
     </header>
   );

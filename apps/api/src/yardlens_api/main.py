@@ -16,13 +16,13 @@ from typing import Any
 import httpx
 import uvicorn
 import watchfiles
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 
 from yardlens_api.api.deps import Container
 from yardlens_api.api.routes import (
+    auth,
     cameras,
     events,
     health,
@@ -31,15 +31,26 @@ from yardlens_api.api.routes import (
     stats,
     streams,
     system,
+    workers,
 )
 from yardlens_api.api.routes.cameras import camera_config
+from yardlens_api.api.security import (
+    CsrfMiddleware,
+    PrivateStaticFiles,
+    allowed_origins,
+    require_user,
+)
 from yardlens_api.core.config import Settings, get_settings
 from yardlens_api.core.errors import register_exception_handlers
+from yardlens_api.core.i18n import LOGIN_ALERT
 from yardlens_api.core.logging import configure_logging
+from yardlens_api.core.security import load_secret, password_hasher
 from yardlens_api.db.models import Camera
 from yardlens_api.db.session import create_engine, create_session_factory, init_models
+from yardlens_api.services.auth import AuthService
 from yardlens_api.services.camera_manager import CameraManager
 from yardlens_api.services.camera_worker import WorkerOptions
+from yardlens_api.services.cluster import Cluster
 from yardlens_api.services.detector import Detector, ModelPool, YoloDetector
 from yardlens_api.services.event_bus import EventBus
 from yardlens_api.services.event_recorder import EventRecorder
@@ -83,6 +94,7 @@ def create_app(
         tasks = _TaskGroup()
         if not container.detector.status.loaded:
             tasks.spawn(_load_model(container), "model-loader")
+        await _ensure_admin(container)
         tasks.spawn(_retention_loop(container), "retention")
         container.monitor.start()
         container.recorder.start()
@@ -99,24 +111,41 @@ def create_app(
             await container.http_client.aclose()
             await container.engine.dispose()
 
+    production = config.environment == "production"
     app = FastAPI(
         title="YardLens API",
         version=version("yardlens-api"),
         description="Camera-based yard monitoring: live detection, tracking and counting.",
         lifespan=lifespan,
+        docs_url=None if production else "/docs",
+        redoc_url=None,
+        openapi_url=None if production else "/openapi.json",
     )
+    origins = allowed_origins(config)
+    app.add_middleware(CsrfMiddleware, origins=origins)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=config.cors_origins,
+        allow_origins=sorted(origins),
+        allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
     register_exception_handlers(app)
-    for module in (health, system, cameras, streams, events, stats, loading, settings):
-        app.include_router(module.router, prefix="/api")
+
+    @app.get("/api/ping", tags=["system"], include_in_schema=False)
+    async def ping() -> dict[str, str]:
+        """Liveness for container health checks; says nothing else."""
+        return {"status": "ok"}
+
+    app.include_router(auth.router, prefix="/api")
+    # Workers sign in with their own token.
+    app.include_router(workers.agent_router, prefix="/api")
+    signed_in = [Depends(require_user)]
+    for module in (health, system, cameras, streams, events, stats, loading, settings, workers):
+        app.include_router(module.router, prefix="/api", dependencies=signed_in)
     app.mount(
         SNAPSHOTS_URL_PREFIX,
-        StaticFiles(directory=config.snapshots_dir, check_dir=False),
+        PrivateStaticFiles(directory=config.snapshots_dir, check_dir=False),
         name="snapshots",
     )
     return app
@@ -130,6 +159,28 @@ async def build_container(config: Settings, detector: Detector | None) -> Contai
     store = SettingsStore(default_model=config.default_model)
     async with session_factory() as session:
         await store.load(session)
+    http_client = httpx.AsyncClient()
+    notifier = TelegramNotifier(http_client)
+
+    async def alert(address: str) -> None:
+        telegram = store.telegram()
+        if not (telegram.enabled and telegram.bot_token and telegram.chat_id):
+            return
+        text = LOGIN_ALERT[telegram.language].format(address=address)
+        try:
+            await notifier.send_message(telegram.bot_token, telegram.chat_id, text)
+        except Exception:
+            logger.warning("Could not send the sign-in alert", exc_info=True)
+
+    auth_service = AuthService(
+        session_factory=session_factory,
+        secret=load_secret(config.auth_secret, config.data_dir / "auth-secret"),
+        hasher=password_hasher(fast=config.environment == "test"),
+        access_ttl=timedelta(minutes=config.access_token_minutes),
+        refresh_ttl=timedelta(days=config.refresh_token_days),
+        alert=alert,
+    )
+    await auth_service.load_revocations()
 
     plan = plan_resources(inference_threads=config.inference_threads)
     apply_process_plan(plan, low_priority=config.low_priority and config.environment != "test")
@@ -182,8 +233,6 @@ async def build_container(config: Settings, detector: Detector | None) -> Contai
         data_dir=config.data_dir,
     )
     bus = EventBus()
-    http_client = httpx.AsyncClient()
-    notifier = TelegramNotifier(http_client)
     names: dict[int, str] = {}
     recorder = EventRecorder(
         session_factory=session_factory,
@@ -216,7 +265,23 @@ async def build_container(config: Settings, detector: Detector | None) -> Contai
         limits=monitor.limits,
         detector_for=models.get,
         names=names,
-        workers_enabled=config.workers_enabled,
+    )
+
+    def local_capacity() -> float:
+        # The server also runs the database and the dashboard: it counts for a bit less.
+        gpu = resolved_detector.status.device.startswith("cuda")
+        return plan.physical_cores * 0.75 * (4.0 if gpu else 1.0)
+
+    cluster = Cluster(
+        manager,
+        session_factory=session_factory,
+        recorder=recorder,
+        settings_store=store,
+        snapshots_dir=config.snapshots_dir,
+        names=names,
+        local_available=config.workers_enabled,
+        local_capacity=local_capacity,
+        save_images=lambda: monitor.limits().save_images,
     )
     return Container(
         settings=config,
@@ -225,12 +290,13 @@ async def build_container(config: Settings, detector: Detector | None) -> Contai
         detector=resolved_detector,
         models=models,
         settings_store=store,
-        cameras=manager,
+        cameras=cluster,
         bus=bus,
         recorder=recorder,
         notifier=notifier,
         http_client=http_client,
         monitor=monitor,
+        auth=auth_service,
         started_at=datetime.now(UTC),
     )
 
@@ -238,18 +304,15 @@ async def build_container(config: Settings, detector: Detector | None) -> Contai
 async def _start_workers(container: Container) -> None:
     async with container.session_factory() as session:
         rows = (await session.scalars(select(Camera).order_by(Camera.id))).all()
-        running = (
-            {camera.id for camera in rows if camera.enabled}
-            if container.settings.workers_enabled
-            else set[int]()
-        )
+        # Every enabled camera runs somewhere: here, or on a worker that kept it running.
+        running = {camera.id for camera in rows if camera.enabled}
         resumable, closed = await take_interrupted_sessions(session, running_cameras=running)
     if closed:
         logger.info("Closed loading sessions cut off by a restart", extra={"count": closed})
-    for camera in rows:
-        container.cameras.sync(
-            camera_config(camera), enabled=camera.enabled, resume=resumable.get(camera.id)
-        )
+    await container.cameras.start(
+        ((camera_config(camera), camera.enabled, camera.worker_id) for camera in rows),
+        resumable,
+    )
     general = container.settings_store.detection().model
     container.models.retain(container.cameras.models_in_use() - {general})
 
@@ -260,6 +323,20 @@ async def _load_model(container: Container) -> None:
         await asyncio.to_thread(container.detector.load, model)
     except Exception:
         logger.exception("Could not load detection model", extra={"model": model})
+
+
+async def _ensure_admin(container: Container) -> None:
+    """Create the administrator from the environment on first start (Docker, tests)."""
+    config = container.settings
+    if not (config.admin_username and config.admin_password):
+        if not await container.auth.has_user():
+            logger.warning(
+                "No administrator yet: create one with `uv run yardlens-admin create`, or set "
+                "YARDLENS_ADMIN_USERNAME and YARDLENS_ADMIN_PASSWORD"
+            )
+        return
+    if not await container.auth.has_user():
+        await container.auth.create_admin(config.admin_username, config.admin_password)
 
 
 async def _retention_loop(container: Container) -> None:
@@ -280,6 +357,7 @@ async def _retention_loop(container: Container) -> None:
                 logger.info("Purged old events", extra={"count": deleted})
             if images:
                 logger.info("Purged old loading session photos", extra={"count": len(images)})
+            await container.auth.purge()
         except Exception:
             logger.exception("Retention cleanup failed")
         await asyncio.sleep(_RETENTION_INTERVAL_SECONDS)
@@ -317,6 +395,9 @@ def _serve(*, reload: bool = False) -> None:
         reload_dirs=[str(_SOURCE_DIR)] if reload else None,
         log_config=None,
         timeout_graceful_shutdown=10,
+        # Behind Caddy: client addresses and https come from its X-Forwarded-* headers.
+        proxy_headers=True,
+        forwarded_allow_ips=config.forwarded_allow_ips,
     )
 
 

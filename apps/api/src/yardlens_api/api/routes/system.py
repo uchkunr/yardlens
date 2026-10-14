@@ -75,17 +75,21 @@ async def resources(container: ContainerDep) -> SystemResources:
     limits = monitor.limits()
     performance = container.settings_store.performance()
     cameras: list[CameraLoad] = []
-    for worker in container.cameras.workers():
-        state = worker.state()
+    for running in container.cameras.running():
+        state = running.state
         cameras.append(
             CameraLoad(
-                id=worker.config.id,
-                name=worker.config.name,
+                id=running.config.id,
+                name=running.config.name,
                 activity=state.activity,
                 target_fps=state.target_fps,
                 measured_fps=state.measured_fps,
-                max_fps=worker.config.inference_fps,
+                max_fps=running.config.inference_fps,
                 hardware_decoding=state.hardware_decoding,
+                worker_id=running.worker_id,
+                worker_name=container.cameras.worker_name(running.worker_id)
+                if running.worker_id is not None
+                else None,
             )
         )
     return SystemResources(

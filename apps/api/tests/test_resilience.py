@@ -1,9 +1,11 @@
 """Losing nothing to a database outage or an API restart."""
 
 import asyncio
+import time
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -12,12 +14,22 @@ from sqlalchemy import select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from tests.conftest import FakeDetector, browser, login, write_test_video
 from tests.test_loading import START, ZONE, at, tick
 from yardlens_api.api.deps import Container
-from yardlens_api.core.enums import EventType, SessionStatus
+from yardlens_api.core.config import Settings
+from yardlens_api.core.enums import EventType, SessionStatus, SourceType
 from yardlens_api.db.models import Event, LoadingSession
+from yardlens_api.main import create_app
+from yardlens_api.schemas.camera import LoadingZone, ZonePoint
+from yardlens_api.schemas.settings import DetectionSettings
 from yardlens_api.services import event_recorder
-from yardlens_api.services.camera_worker import WorkerEvent
+from yardlens_api.services.camera_worker import (
+    CameraConfig,
+    CameraWorker,
+    WorkerEvent,
+    WorkerOptions,
+)
 from yardlens_api.services.event_recorder import EventRecorder, is_transient
 from yardlens_api.services.loading import (
     HEARTBEAT_SECONDS,
@@ -290,3 +302,115 @@ async def test_old_session_photos_are_forgotten_but_the_sessions_stay(
         assert recent is not None
         assert (old.vehicle_snapshot_path, old.plate_snapshot_path) == (None, None)
         assert recent.vehicle_snapshot_path == "sessions/recent-vehicle.jpg"
+
+
+# -- stopping without closing -------------------------------------------------------------------
+
+
+class _Sessions:
+    def __init__(self) -> None:
+        self.states: list[SessionState] = []
+
+    def on_event(self, event: WorkerEvent) -> None:
+        pass
+
+    def on_status(self, camera_id: int, status: Any, last_error: str | None) -> None:
+        pass
+
+    def on_session(self, session: SessionState) -> None:
+        self.states.append(session)
+
+
+# Around where the fake detector's parked car meets the ground: (0.22, 0.5) of the frame.
+_BAY = LoadingZone(
+    points=[
+        ZonePoint(x=0.0, y=0.3),
+        ZonePoint(x=0.5, y=0.3),
+        ZonePoint(x=0.5, y=0.7),
+        ZonePoint(x=0.0, y=0.7),
+    ]
+)
+
+
+def _bay_worker(tmp_path: Path, listener: _Sessions) -> CameraWorker:
+    clip = write_test_video(tmp_path / "clip.mp4")
+    return CameraWorker(
+        CameraConfig(
+            id=1,
+            name="Bay",
+            source_type=SourceType.FILE,
+            url=str(clip),
+            inference_fps=10.0,
+            line=None,
+            zone=_BAY,
+        ),
+        detector=FakeDetector(),
+        detection_settings=DetectionSettings,
+        listener=listener,
+        options=WorkerOptions(
+            snapshots_dir=tmp_path / "snapshots", base_dir=tmp_path, loading_arrive_seconds=0.3
+        ),
+    )
+
+
+@pytest.mark.parametrize(("detach", "closed"), [(True, False), (False, True)])
+def test_a_detached_stop_leaves_the_session_open(
+    tmp_path: Path, detach: bool, closed: bool
+) -> None:
+    listener = _Sessions()
+    worker = _bay_worker(tmp_path, listener)
+    worker.start()
+    try:
+        deadline = time.monotonic() + 5
+        while not listener.states and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert listener.states, "no session opened"
+        assert worker.handoff() is not None
+    finally:
+        worker.stop(detach=detach)
+        worker.join(5.0)
+    completed = [state for state in listener.states if state.status is SessionStatus.COMPLETED]
+    assert bool(completed) is closed
+
+
+@pytest.mark.usefixtures("video_file")
+async def test_a_graceful_restart_resumes_the_session(settings: Settings) -> None:
+    settings = settings.model_copy(update={"loading_arrive_seconds": 0.3})
+
+    async def bay_session(client: httpx.AsyncClient, camera_id: int) -> str | None:
+        runtime = (await client.get(f"/api/cameras/{camera_id}")).json()["runtime"]
+        loading = runtime["loading"]
+        return loading["id"] if loading else None
+
+    first = create_app(settings, detector=FakeDetector())
+    async with first.router.lifespan_context(first), browser(first) as client:
+        await login(client)
+        created = await client.post(
+            "/api/cameras",
+            json={
+                "name": "Bay",
+                "source_type": "file",
+                "url": "videos/clip.mp4",
+                "inference_fps": 10,
+                "zone": _BAY.model_dump(),
+            },
+        )
+        camera_id = created.json()["id"]
+        session_id = None
+        for _ in range(250):
+            session_id = await bay_session(client, camera_id)
+            if session_id:
+                break
+            await asyncio.sleep(0.02)
+        assert session_id, "no session opened"
+
+    second = create_app(settings, detector=FakeDetector())
+    async with second.router.lifespan_context(second):
+        container: Container = second.state.container
+        async with container.session_factory() as session:
+            row = await session.get(LoadingSession, session_id)
+            assert row is not None
+            assert row.status == SessionStatus.ACTIVE.value, "shutdown must not close it"
+        async with browser(second) as client:
+            await login(client)
+            assert await bay_session(client, camera_id) == session_id

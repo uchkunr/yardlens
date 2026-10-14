@@ -379,3 +379,23 @@ def build_workbook(
     buffer = io.BytesIO()
     workbook.save(buffer)
     return buffer.getvalue()
+
+
+async def resumable_session(
+    session: AsyncSession, camera_id: int, *, now: datetime | None = None
+) -> InterruptedSession | None:
+    """The camera's open session, when it was saved recently enough to be carried on by the node
+    the camera moves to."""
+    now = now or datetime.now(UTC)
+    row = await session.scalar(
+        select(LoadingSession)
+        .where(
+            LoadingSession.camera_id == camera_id,
+            LoadingSession.status == SessionStatus.ACTIVE.value,
+        )
+        .order_by(LoadingSession.updated_at.desc())
+        .limit(1)
+    )
+    if row is None or now - row.updated_at > RESUME_WINDOW:
+        return None
+    return InterruptedSession(row_to_state(row), row.updated_at)

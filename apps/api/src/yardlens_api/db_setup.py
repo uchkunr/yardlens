@@ -19,7 +19,7 @@ from yardlens_api.core.logging import configure_logging
 
 logger = logging.getLogger("yardlens_api.db_setup")
 
-SCHEMA_PATH = Path(__file__).resolve().parents[2] / "db" / "schema.sql"
+SCHEMA_PATH = Path(__file__).parent / "db" / "schema.sql"
 
 
 async def ensure_database(url: URL) -> bool:

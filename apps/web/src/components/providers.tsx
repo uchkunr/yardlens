@@ -4,8 +4,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "next-themes";
 import type { ReactNode } from "react";
 
-import { LiveEventsProvider } from "@/components/shared/live-events-provider";
-import { StreamSlotsProvider } from "@/components/shared/live-feed";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useI18n } from "@/i18n/provider";
@@ -39,11 +37,7 @@ export function Providers({ children }: { children: ReactNode }) {
   return (
     <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
       <QueryClientProvider client={getQueryClient()}>
-        <LiveEventsProvider>
-          <StreamSlotsProvider>
-            <TooltipProvider delayDuration={300}>{children}</TooltipProvider>
-          </StreamSlotsProvider>
-        </LiveEventsProvider>
+        <TooltipProvider delayDuration={300}>{children}</TooltipProvider>
         <Toaster
           position="bottom-right"
           richColors
