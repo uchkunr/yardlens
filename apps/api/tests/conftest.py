@@ -81,7 +81,7 @@ def settings(tmp_path: Path) -> Settings:
         data_dir=tmp_path / "data",
         database_url=f"sqlite+aiosqlite:///{tmp_path / 'test.db'}",
         workers_enabled=True,
-        cors_origins=["http://localhost:3000"],
+        cors_origins=["http://localhost:3100"],
     )
 
 

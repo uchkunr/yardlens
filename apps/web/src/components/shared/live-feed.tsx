@@ -13,6 +13,7 @@ import {
 } from "react";
 
 import { Spinner } from "@/components/ui/spinner";
+import { useI18n } from "@/i18n/provider";
 import { snapshotUrl, streamUrl, type CameraStatus } from "@/lib/api/client";
 import { cn } from "@/lib/utils";
 
@@ -147,11 +148,11 @@ function MjpegStream({
   );
 }
 
-const OVERLAYS: Partial<Record<CameraStatus, { icon: ReactNode; label: string }>> = {
-  connecting: { icon: <Spinner className="size-5" />, label: "Connecting…" },
-  offline: { icon: <WifiOff className="size-5" />, label: "Offline — reconnecting" },
-  error: { icon: <CircleAlert className="size-5" />, label: "Source error" },
-  disabled: { icon: <VideoOff className="size-5" />, label: "Camera disabled" },
+const OVERLAY_ICONS: Partial<Record<CameraStatus, ReactNode>> = {
+  connecting: <Spinner className="size-5" />,
+  offline: <WifiOff className="size-5" />,
+  error: <CircleAlert className="size-5" />,
+  disabled: <VideoOff className="size-5" />,
 };
 
 type LiveFeedProps = {
@@ -171,8 +172,9 @@ export function LiveFeed({ cameraId, name, status, priority = false, className, 
   const online = status === "online";
   const [streamFailed, setStreamFailed] = useState(false);
   const granted = useStreamSlot(visible && online && !streamFailed, priority);
-  const overlay = online ? null : OVERLAYS[status];
-  const alt = `Live annotated feed from ${name}`;
+  const { t } = useI18n();
+  const overlay = status === "online" ? null : { icon: OVERLAY_ICONS[status], label: t.feed[status] };
+  const alt = t.feed.alt(name);
   const imageClass = "absolute inset-0 size-full object-contain";
 
   return (

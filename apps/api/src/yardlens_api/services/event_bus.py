@@ -1,4 +1,4 @@
-"""In-process pub/sub used to fan out live messages (events, camera status) to SSE clients."""
+"""In-process pub/sub fanning out live messages (events, camera status, loading) to SSE clients."""
 
 import asyncio
 import logging
@@ -9,7 +9,7 @@ from typing import Literal
 
 logger = logging.getLogger(__name__)
 
-type MessageKind = Literal["event", "camera_status"]
+type MessageKind = Literal["event", "camera_status", "session"]
 
 
 @dataclass(frozen=True, slots=True)

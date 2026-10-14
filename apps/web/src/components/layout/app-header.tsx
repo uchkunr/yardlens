@@ -4,14 +4,17 @@ import { usePathname } from "next/navigation";
 import { Suspense } from "react";
 
 import { NAV_ITEMS, isActivePath } from "@/components/layout/app-sidebar";
+import { LanguageSwitcher } from "@/components/layout/language-switcher";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
+import { useI18n } from "@/i18n/provider";
 
 function SectionTitle() {
   const pathname = usePathname();
+  const { t } = useI18n();
   const section = NAV_ITEMS.find((item) => isActivePath(pathname, item.href));
-  return <span className="text-sm font-medium">{section?.label ?? "YardLens"}</span>;
+  return <span className="text-sm font-medium">{section ? t.nav[section.key] : "YardLens"}</span>;
 }
 
 export function AppHeader() {
@@ -23,6 +26,7 @@ export function AppHeader() {
         <SectionTitle />
       </Suspense>
       <div className="ml-auto flex items-center gap-1">
+        <LanguageSwitcher />
         <ThemeToggle />
       </div>
     </header>

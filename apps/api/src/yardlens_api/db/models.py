@@ -17,7 +17,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.types import TypeDecorator
 
-# The canonical PostgreSQL schema lives in db/schema.sql (applied with psql). These mappings match
+# The canonical PostgreSQL schema lives in db/schema.sql (applied by db-setup). These mappings match
 # it; ``metadata.create_all`` is only used for SQLite (tests and quick local runs).
 JsonType = JSON().with_variant(JSONB(), "postgresql")
 
@@ -64,10 +64,14 @@ class Camera(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     inference_fps: Mapped[float] = mapped_column(Float, default=3.0)
     line: Mapped[dict[str, Any] | None] = mapped_column(default=None)
+    zone: Mapped[dict[str, Any] | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
 
     events: Mapped[list[Event]] = relationship(
+        back_populates="camera", cascade="all, delete-orphan", passive_deletes=True
+    )
+    loading_sessions: Mapped[list[LoadingSession]] = relationship(
         back_populates="camera", cascade="all, delete-orphan", passive_deletes=True
     )
 
@@ -93,6 +97,37 @@ class Event(Base):
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
     camera: Mapped[Camera] = relationship(back_populates="events")
+
+
+class LoadingSession(Base):
+    """A vehicle loaded in a bay: when it came and left, how much cargo moved, its plate."""
+
+    __tablename__ = "loading_sessions"
+    __table_args__ = (
+        Index("ix_loading_sessions_arrived", "arrived_at"),
+        Index("ix_loading_sessions_camera_arrived", "camera_id", "arrived_at"),
+        Index("ix_loading_sessions_plate", "plate"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    camera_id: Mapped[int] = mapped_column(ForeignKey("cameras.id", ondelete="CASCADE"))
+    status: Mapped[str] = mapped_column(String(16))
+    arrived_at: Mapped[datetime] = mapped_column()
+    departed_at: Mapped[datetime | None] = mapped_column(default=None)
+    loading_started_at: Mapped[datetime | None] = mapped_column(default=None)
+    loading_finished_at: Mapped[datetime | None] = mapped_column(default=None)
+    loaded: Mapped[int] = mapped_column(Integer, default=0)
+    unloaded: Mapped[int] = mapped_column(Integer, default=0)
+    vehicle_class: Mapped[str | None] = mapped_column(String(64), default=None)
+    plate: Mapped[str | None] = mapped_column(String(16), default=None)
+    plate_confidence: Mapped[float | None] = mapped_column(Float, default=None)
+    plate_corrected: Mapped[bool] = mapped_column(Boolean, default=False)
+    vehicle_snapshot_path: Mapped[str | None] = mapped_column(String(512), default=None)
+    plate_snapshot_path: Mapped[str | None] = mapped_column(String(512), default=None)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
+
+    camera: Mapped[Camera] = relationship(back_populates="loading_sessions")
 
 
 class AppSetting(Base):

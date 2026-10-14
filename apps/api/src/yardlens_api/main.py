@@ -1,21 +1,28 @@
+import argparse
 import asyncio
 import contextlib
 import logging
+import multiprocessing
+import os
+import sys
+import threading
 from collections.abc import AsyncGenerator, Coroutine
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from importlib.metadata import version
+from pathlib import Path
 from typing import Any
 
 import httpx
 import uvicorn
+import watchfiles
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 
 from yardlens_api.api.deps import Container
-from yardlens_api.api.routes import cameras, events, health, settings, stats, streams
+from yardlens_api.api.routes import cameras, events, health, loading, settings, stats, streams
 from yardlens_api.api.routes.cameras import camera_config
 from yardlens_api.core.config import Settings, get_settings
 from yardlens_api.core.errors import register_exception_handlers
@@ -28,12 +35,15 @@ from yardlens_api.services.detector import Detector, YoloDetector
 from yardlens_api.services.event_bus import EventBus
 from yardlens_api.services.event_recorder import EventRecorder
 from yardlens_api.services.events import SNAPSHOTS_URL_PREFIX, purge_events_before
+from yardlens_api.services.loading_store import close_interrupted_sessions
 from yardlens_api.services.notifier import TelegramNotifier
+from yardlens_api.services.plates import FastAlprReader
 from yardlens_api.services.settings_store import SettingsStore
 
 logger = logging.getLogger(__name__)
 
 _RETENTION_INTERVAL_SECONDS = 3600
+_SOURCE_DIR = Path(__file__).parent
 
 
 def create_app(
@@ -78,7 +88,7 @@ def create_app(
         allow_headers=["*"],
     )
     register_exception_handlers(app)
-    for module in (health, cameras, streams, events, stats, settings):
+    for module in (health, cameras, streams, events, stats, loading, settings):
         app.include_router(module.router, prefix="/api")
     app.mount(
         SNAPSHOTS_URL_PREFIX,
@@ -96,11 +106,15 @@ async def build_container(config: Settings, detector: Detector | None) -> Contai
     store = SettingsStore(default_model=config.default_model)
     async with session_factory() as session:
         await store.load(session)
+        interrupted = await close_interrupted_sessions(session)
+    if interrupted:
+        logger.info("Closed loading sessions cut off by a restart", extra={"count": interrupted})
 
     resolved_detector = detector or YoloDetector(
         models_dir=config.models_dir,
         model_name=store.detection().model,
         device=config.inference_device,
+        cpu_threads=config.inference_threads,
     )
     bus = EventBus()
     http_client = httpx.AsyncClient()
@@ -124,10 +138,14 @@ async def build_container(config: Settings, detector: Detector | None) -> Contai
             snapshot_max_width=config.snapshot_max_width,
             max_frame_width=config.max_frame_width,
             stream_fps=config.stream_fps,
+            loading_arrive_seconds=config.loading_arrive_seconds,
+            loading_depart_seconds=config.loading_depart_seconds,
         ),
         loop=asyncio.get_running_loop(),
         on_event=recorder.submit,
         on_status=recorder.publish_status,
+        on_session=recorder.submit_session,
+        plate_reader=FastAlprReader() if detector is None else None,
         names=names,
         workers_enabled=config.workers_enabled,
     )
@@ -195,14 +213,50 @@ class _TaskGroup:
                 await task
 
 
-def main() -> None:
-    """Run the API with uvicorn (``uv run yardlens-api``)."""
+def _serve(*, reload: bool = False) -> None:
     config = get_settings()
+    # The app configures logging itself; this covers uvicorn's own startup and reloader messages.
+    configure_logging(config.log_level, json_output=config.log_json)
     uvicorn.run(
         "yardlens_api.main:create_app",
         factory=True,
         host=config.host,
         port=config.port,
+        reload=reload,
+        reload_dirs=[str(_SOURCE_DIR)] if reload else None,
         log_config=None,
         timeout_graceful_shutdown=10,
     )
+
+
+def _serve_under_watchfiles() -> None:
+    """The server process watchfiles restarts. Windows doesn't end child processes with their
+    parent, so when the parent is killed outright (as Nx does when it stops a task), the server
+    would keep running on its own; instead it exits as soon as the parent is gone."""
+    parent = multiprocessing.parent_process()
+    if parent is not None:
+
+        def follow_parent() -> None:
+            parent.join()
+            os._exit(0)
+
+        threading.Thread(target=follow_parent, name="parent-watch", daemon=True).start()
+    _serve()
+
+
+def main() -> None:
+    """Run the API with uvicorn (``uv run yardlens-api``; ``--reload`` for development)."""
+    parser = argparse.ArgumentParser(description="Run the YardLens API.")
+    parser.add_argument("--reload", action="store_true", help="restart when the source changes")
+    args = parser.parse_args()
+    if args.reload and sys.platform == "win32":
+        # On Windows uvicorn's reloader restarts the server with a Ctrl+C sent to the whole
+        # console, which also stops everything else running in it (Nx, Next.js). watchfiles
+        # ends only the server process.
+        config = get_settings()
+        configure_logging(config.log_level, json_output=config.log_json)
+        watchfiles.run_process(
+            _SOURCE_DIR, target=_serve_under_watchfiles, watch_filter=watchfiles.PythonFilter()
+        )
+    else:
+        _serve(reload=bool(args.reload))

@@ -47,6 +47,7 @@ async def test_camera_crud(client: httpx.AsyncClient) -> None:
         "visible": {},
         "line_in": 0,
         "line_out": 0,
+        "loading": None,
     }
 
     listed = (await client.get("/api/cameras")).json()
@@ -62,6 +63,16 @@ async def test_camera_crud(client: httpx.AsyncClient) -> None:
 
     cleared = await client.patch(f"/api/cameras/{camera_id}", json={"line": None})
     assert cleared.json()["line"] is None
+
+    zone = {"points": [{"x": 0.1, "y": 0.5}, {"x": 0.9, "y": 0.5}, {"x": 0.5, "y": 0.95}]}
+    zoned = await client.patch(f"/api/cameras/{camera_id}", json={"zone": zone})
+    assert zoned.json()["zone"] == zone
+    too_few = await client.patch(
+        f"/api/cameras/{camera_id}", json={"zone": {"points": zone["points"][:2]}}
+    )
+    assert too_few.status_code == 422
+    unzoned = await client.patch(f"/api/cameras/{camera_id}", json={"zone": None})
+    assert unzoned.json()["zone"] is None
 
     assert (await client.delete(f"/api/cameras/{camera_id}")).status_code == 204
     assert (await client.get(f"/api/cameras/{camera_id}")).status_code == 404
@@ -244,6 +255,7 @@ async def test_stats_overview(
 async def test_settings_roundtrip_masks_token(client: httpx.AsyncClient) -> None:
     initial = (await client.get("/api/settings")).json()
     assert initial["telegram"]["bot_token_set"] is False
+    assert initial["telegram"]["language"] == "ru"
     assert "car" in initial["available_classes"]
 
     response = await client.put(
@@ -260,8 +272,9 @@ async def test_settings_roundtrip_masks_token(client: httpx.AsyncClient) -> None
     assert body["telegram"]["bot_token_hint"] == "••••DEFG"
     assert "123456:ABCDEFG" not in response.text
 
-    kept = await client.put("/api/settings", json={"telegram": {"chat_id": "43"}})
+    kept = await client.put("/api/settings", json={"telegram": {"chat_id": "43", "language": "en"}})
     assert kept.json()["telegram"]["bot_token_set"] is True
+    assert kept.json()["telegram"]["language"] == "en"
 
     invalid = await client.put(
         "/api/settings",

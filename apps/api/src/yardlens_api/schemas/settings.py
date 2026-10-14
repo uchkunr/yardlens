@@ -3,11 +3,13 @@ from typing import Annotated
 from pydantic import BaseModel, Field, StringConstraints
 
 from yardlens_api.core.enums import DEFAULT_CLASSES, EventType
+from yardlens_api.core.i18n import DEFAULT_LANGUAGE, Language
 
 DEFAULT_NOTIFY_EVENTS: tuple[EventType, ...] = (
     EventType.LINE_CROSSED_IN,
     EventType.LINE_CROSSED_OUT,
     EventType.CAMERA_OFFLINE,
+    EventType.LOADING_COMPLETED,
 )
 
 
@@ -19,6 +21,10 @@ class DetectionSettings(BaseModel):
     classes: Annotated[list[str], Field(min_length=1)] = Field(
         default_factory=lambda: list(DEFAULT_CLASSES)
     )
+    cargo_classes: list[str] = Field(
+        default_factory=list[str],
+        description="Classes counted as cargo on loading-bay cameras; a subset of `classes`",
+    )
 
 
 class TelegramSettings(BaseModel):
@@ -29,6 +35,7 @@ class TelegramSettings(BaseModel):
     chat_id: str | None = None
     notify_events: list[EventType] = Field(default_factory=lambda: list(DEFAULT_NOTIFY_EVENTS))
     min_interval_seconds: Annotated[int, Field(ge=0, le=3600)] = 30
+    language: Language = DEFAULT_LANGUAGE
 
 
 class TelegramSettingsRead(BaseModel):
@@ -38,6 +45,7 @@ class TelegramSettingsRead(BaseModel):
     chat_id: str | None
     notify_events: list[EventType]
     min_interval_seconds: int
+    language: Language = Field(description="Language of the notification text")
 
 
 class TelegramSettingsUpdate(BaseModel):
@@ -48,6 +56,7 @@ class TelegramSettingsUpdate(BaseModel):
     chat_id: Annotated[str, StringConstraints(strip_whitespace=True, max_length=64)] | None = None
     notify_events: list[EventType] | None = None
     min_interval_seconds: Annotated[int, Field(ge=0, le=3600)] | None = None
+    language: Language | None = None
 
 
 class SettingsRead(BaseModel):
@@ -67,6 +76,7 @@ class TelegramTestRequest(BaseModel):
 
     bot_token: str | None = None
     chat_id: str | None = None
+    language: Language | None = None
 
 
 class TelegramTestResult(BaseModel):

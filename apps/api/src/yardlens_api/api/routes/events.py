@@ -7,16 +7,13 @@ from fastapi import APIRouter, Query, Request
 from sse_starlette import EventSourceResponse, ServerSentEvent
 
 from yardlens_api.api.deps import ContainerDep, SessionDep
+from yardlens_api.api.params import check_range
 from yardlens_api.core.enums import EventType
-from yardlens_api.core.errors import AppError, NotFoundError
+from yardlens_api.core.errors import NotFoundError
 from yardlens_api.schemas.event import EventPage, EventRead
 from yardlens_api.services.events import EventFilters, get_event, list_events
 
 router = APIRouter(prefix="/events", tags=["events"])
-
-
-class InvalidRangeError(AppError):
-    status_code = 422
 
 
 @router.get("", response_model=EventPage)
@@ -30,8 +27,7 @@ async def get_events(
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=200)] = 25,
 ) -> EventPage:
-    if since is not None and until is not None and since >= until:
-        raise InvalidRangeError("'since' must be earlier than 'until'")
+    check_range(since, until)
     filters = EventFilters(
         camera_id=camera_id,
         types=tuple(type or ()),
@@ -48,7 +44,7 @@ async def get_events(
     responses={200: {"content": {"text/event-stream": {}}}},
 )
 async def stream_events(request: Request, container: ContainerDep) -> EventSourceResponse:
-    """Server-sent events: ``event`` (a new EventRead) and ``camera_status`` messages."""
+    """Server-sent events: ``event`` (a new EventRead), ``camera_status`` and ``session``."""
 
     async def messages() -> AsyncIterator[ServerSentEvent]:
         async with container.bus.subscribe() as queue:

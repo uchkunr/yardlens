@@ -17,9 +17,10 @@ import { Pagination, PaginationContent, PaginationItem } from "@/components/ui/p
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useI18n } from "@/i18n/provider";
 import type { EventType, YardEvent } from "@/lib/api/client";
 import { useCameras, useEvents, useSettings } from "@/lib/api/queries";
-import { classLabel, EVENT_TYPES, formatCount, formatDateTime } from "@/lib/format";
+import { EVENT_TYPES } from "@/lib/format";
 
 const PAGE_SIZES = [25, 50, 100] as const;
 
@@ -49,6 +50,7 @@ export function EventsView() {
   const { filters, page, pageSize } = readState(searchParams);
   const [selected, setSelected] = useState<YardEvent | null>(null);
   const { unseenCount, markSeen } = useLiveEvents();
+  const { t, f } = useI18n();
 
   const cameras = useCameras();
   const settings = useSettings();
@@ -92,12 +94,12 @@ export function EventsView() {
   return (
     <>
       <PageHeader
-        title="Events"
-        description="Every detection, line crossing and camera status change."
+        title={t.nav.events}
+        description={t.events.description}
         actions={
           unseenCount > 0 ? (
             <Button variant="outline" onClick={refresh}>
-              <RefreshCw aria-hidden /> {formatCount(unseenCount)} new
+              <RefreshCw aria-hidden /> {t.events.newCount(f.count(unseenCount))}
             </Button>
           ) : null
         }
@@ -111,18 +113,18 @@ export function EventsView() {
       />
 
       {events.isError ? (
-        <ErrorState title="Couldn't load events" error={events.error} onRetry={() => void events.refetch()} />
+        <ErrorState title={t.errors.loadEvents} error={events.error} onRetry={() => void events.refetch()} />
       ) : (
         <Card className="gap-0 overflow-hidden py-0">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-28 pl-4">Snapshot</TableHead>
-                <TableHead>Event</TableHead>
-                <TableHead>Class</TableHead>
-                <TableHead className="hidden lg:table-cell">Camera</TableHead>
-                <TableHead className="hidden text-right xl:table-cell">Confidence</TableHead>
-                <TableHead className="pr-4 text-right">Time</TableHead>
+                <TableHead className="w-28 pl-4">{t.events.snapshot}</TableHead>
+                <TableHead>{t.events.event}</TableHead>
+                <TableHead>{t.events.class}</TableHead>
+                <TableHead className="hidden lg:table-cell">{t.events.camera}</TableHead>
+                <TableHead className="hidden text-right xl:table-cell">{t.events.confidence}</TableHead>
+                <TableHead className="pr-4 text-right">{t.events.time}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody aria-busy={events.isFetching}>
@@ -145,11 +147,11 @@ export function EventsView() {
                     <EmptyState
                       className="border-none"
                       icon={<ListFilter aria-hidden />}
-                      title="No events found"
+                      title={t.events.emptyTitle}
                       description={
                         Object.values(filters).some(Boolean)
-                          ? "Try widening the filters or the date range."
-                          : "Events appear here as soon as a camera detects something."
+                          ? t.events.emptyFiltered
+                          : t.events.emptyNone
                       }
                     />
                   </TableCell>
@@ -167,7 +169,7 @@ export function EventsView() {
                         setSelected(event);
                       }
                     }}
-                    aria-label={`Open event ${event.id}`}
+                    aria-label={t.events.open(String(event.id))}
                   >
                     <TableCell className="pl-4">
                       <EventThumbnail event={event} />
@@ -175,13 +177,13 @@ export function EventsView() {
                     <TableCell>
                       <EventTypeBadge type={event.type} />
                     </TableCell>
-                    <TableCell>{classLabel(event.class_name)}</TableCell>
+                    <TableCell>{f.className(event.class_name)}</TableCell>
                     <TableCell className="hidden max-w-48 truncate lg:table-cell">{event.camera_name}</TableCell>
                     <TableCell className="text-muted-foreground hidden text-right tabular-nums xl:table-cell">
-                      {event.confidence !== null ? `${Math.round(event.confidence * 100)}%` : "—"}
+                      {event.confidence !== null ? f.percent(event.confidence) : "—"}
                     </TableCell>
                     <TableCell className="text-muted-foreground pr-4 text-right whitespace-nowrap tabular-nums">
-                      <time dateTime={event.created_at}>{formatDateTime(event.created_at)}</time>
+                      <time dateTime={event.created_at}>{f.dateTime(event.created_at)}</time>
                     </TableCell>
                   </TableRow>
                 ))
@@ -195,17 +197,20 @@ export function EventsView() {
         <div className="flex flex-col-reverse items-center justify-between gap-3 sm:flex-row">
           <div className="text-muted-foreground flex items-center gap-2 text-sm">
             <span className="tabular-nums">
-              {formatCount((page - 1) * pageSize + 1)}–{formatCount(Math.min(page * pageSize, total))} of{" "}
-              {formatCount(total)}
+              {t.events.range(
+                f.count((page - 1) * pageSize + 1),
+                f.count(Math.min(page * pageSize, total)),
+                f.count(total),
+              )}
             </span>
             <Select value={String(pageSize)} onValueChange={(size) => update(filters, 1, Number(size))}>
-              <SelectTrigger size="sm" className="w-24" aria-label="Rows per page">
+              <SelectTrigger size="sm" className="w-24" aria-label={t.events.rowsPerPage}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 {PAGE_SIZES.map((size) => (
                   <SelectItem key={size} value={String(size)}>
-                    {size} / page
+                    {t.events.perPage(String(size))}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -219,13 +224,13 @@ export function EventsView() {
                   size="sm"
                   disabled={page <= 1}
                   onClick={() => update(filters, page - 1)}
-                  aria-label="Previous page"
+                  aria-label={t.events.previousPage}
                 >
-                  <ChevronLeft aria-hidden /> Previous
+                  <ChevronLeft aria-hidden /> {t.events.previous}
                 </Button>
               </PaginationItem>
               <PaginationItem className="text-muted-foreground px-2 text-sm tabular-nums">
-                Page {page} of {pageCount}
+                {t.events.pageOf(f.count(page), f.count(pageCount))}
               </PaginationItem>
               <PaginationItem>
                 <Button
@@ -233,9 +238,9 @@ export function EventsView() {
                   size="sm"
                   disabled={page >= pageCount}
                   onClick={() => update(filters, page + 1)}
-                  aria-label="Next page"
+                  aria-label={t.events.nextPage}
                 >
-                  Next <ChevronRight aria-hidden />
+                  {t.events.next} <ChevronRight aria-hidden />
                 </Button>
               </PaginationItem>
             </PaginationContent>

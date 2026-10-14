@@ -14,6 +14,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Spinner } from "@/components/ui/spinner";
+import { useI18n } from "@/i18n/provider";
 import { snapshotUrl, type Camera } from "@/lib/api/client";
 import { useUpdateCamera } from "@/lib/api/queries";
 import { inDirection, lineToPoints, normalizePoint, pointsToLine, type Point } from "@/lib/line";
@@ -92,6 +93,8 @@ export function LineEditorDialog({
   const [imageState, setImageState] = useState<"loading" | "ready" | "error">("loading");
   const frame = useRef<HTMLDivElement>(null);
   const updateCamera = useUpdateCamera();
+  const { t } = useI18n();
+  const m = t.lineEditor;
   const { frame_width: width, frame_height: height } = camera.runtime;
 
   const online = camera.runtime.status === "online";
@@ -111,11 +114,8 @@ export function LineEditorDialog({
     <Dialog open onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Counting line · {camera.name}</DialogTitle>
-          <DialogDescription>
-            Click two points on the frame. Objects crossing in the direction of the green arrow count as
-            &ldquo;in&rdquo;, the opposite direction as &ldquo;out&rdquo;.
-          </DialogDescription>
+          <DialogTitle>{m.title(camera.name)}</DialogTitle>
+          <DialogDescription>{m.description}</DialogDescription>
         </DialogHeader>
 
         {online ? (
@@ -125,11 +125,11 @@ export function LineEditorDialog({
             style={width && height ? { aspectRatio: `${width} / ${height}` } : undefined}
             onClick={addPoint}
             role="application"
-            aria-label="Snapshot. Click to place counting line points."
+            aria-label={m.frameLabel}
           >
             <img
               src={snapshotUrl(camera.id, { raw: true, nonce })}
-              alt={`Current frame from ${camera.name}`}
+              alt={m.frameAlt(camera.name)}
               className="absolute inset-0 size-full object-fill"
               onLoad={() => setImageState("ready")}
               onError={() => setImageState("error")}
@@ -145,17 +145,15 @@ export function LineEditorDialog({
               <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
                 <span className="flex items-center gap-1.5 rounded-md bg-black/70 px-2.5 py-1 text-xs text-white">
                   <MousePointerClick className="size-3.5" aria-hidden />
-                  {points.length === 0 ? "Click the start point" : "Click the end point"}
+                  {points.length === 0 ? m.clickStart : m.clickEnd}
                 </span>
               </div>
             ) : null}
           </div>
         ) : (
           <Alert>
-            <AlertTitle>Camera is not streaming</AlertTitle>
-            <AlertDescription>
-              A live frame is needed to place the line. Enable the camera and wait until it is online.
-            </AlertDescription>
+            <AlertTitle>{m.notStreamingTitle}</AlertTitle>
+            <AlertDescription>{m.notStreamingDescription}</AlertDescription>
           </Alert>
         )}
 
@@ -166,10 +164,10 @@ export function LineEditorDialog({
             }}
             disabled={!online}
           >
-            <RefreshCw aria-hidden /> New frame
+            <RefreshCw aria-hidden /> {m.newFrame}
           </Button>
           <Button variant="outline" size="sm" onClick={() => setPoints([])} disabled={points.length === 0}>
-            <Undo2 aria-hidden /> Clear points
+            <Undo2 aria-hidden /> {m.clear}
           </Button>
           <Button
             variant="outline"
@@ -177,25 +175,25 @@ export function LineEditorDialog({
             onClick={() => setPoints((current) => [...current].reverse())}
             disabled={!line}
           >
-            <ArrowLeftRight aria-hidden /> Flip direction
+            <ArrowLeftRight aria-hidden /> {m.flip}
           </Button>
         </div>
 
         <DialogFooter className="gap-2 sm:justify-between">
           {camera.line ? (
             <Button variant="ghost" className="text-destructive" onClick={() => save(null)} disabled={updateCamera.isPending}>
-              <Trash2 aria-hidden /> Remove line
+              <Trash2 aria-hidden /> {m.remove}
             </Button>
           ) : (
             <span />
           )}
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
+              {t.common.cancel}
             </Button>
             <Button onClick={() => save(line)} disabled={!line || updateCamera.isPending}>
               {updateCamera.isPending ? <Spinner /> : null}
-              Save line
+              {m.save}
             </Button>
           </div>
         </DialogFooter>

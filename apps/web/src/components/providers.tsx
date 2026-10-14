@@ -8,6 +8,7 @@ import { LiveEventsProvider } from "@/components/shared/live-events-provider";
 import { StreamSlotsProvider } from "@/components/shared/live-feed";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { useI18n } from "@/i18n/provider";
 import { ApiError } from "@/lib/api/client";
 
 let browserQueryClient: QueryClient | undefined;
@@ -34,6 +35,7 @@ function getQueryClient() {
 }
 
 export function Providers({ children }: { children: ReactNode }) {
+  const { t } = useI18n();
   return (
     <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
       <QueryClientProvider client={getQueryClient()}>
@@ -42,7 +44,13 @@ export function Providers({ children }: { children: ReactNode }) {
             <TooltipProvider delayDuration={300}>{children}</TooltipProvider>
           </StreamSlotsProvider>
         </LiveEventsProvider>
-        <Toaster position="bottom-right" richColors closeButton />
+        <Toaster
+          position="bottom-right"
+          richColors
+          closeButton
+          containerAriaLabel={t.common.notifications}
+          toastOptions={{ closeButtonAriaLabel: t.common.closeNotification }}
+        />
       </QueryClientProvider>
     </ThemeProvider>
   );

@@ -3,7 +3,13 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 
-import { EVENTS_STREAM_URL, type Camera, type CameraStatus, type YardEvent } from "@/lib/api/client";
+import {
+  EVENTS_STREAM_URL,
+  type Camera,
+  type CameraStatus,
+  type LoadingSession,
+  type YardEvent,
+} from "@/lib/api/client";
 import { prependRecentEvent, queryKeys } from "@/lib/api/queries";
 
 type CameraStatusMessage = { camera_id: number; status: CameraStatus; last_error: string | null };
@@ -23,6 +29,7 @@ const LiveEventsContext = createContext<LiveEventsState>({
 });
 
 const STATS_REFRESH_DELAY_MS = 3_000;
+const LOADING_REFRESH_DELAY_MS = 1_000;
 
 /** One app-wide SSE connection that keeps cached queries fresh as events arrive. */
 export function LiveEventsProvider({ children }: { children: ReactNode }) {
@@ -33,12 +40,20 @@ export function LiveEventsProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const source = new EventSource(EVENTS_STREAM_URL);
     let statsTimer: ReturnType<typeof setTimeout> | undefined;
+    let loadingTimer: ReturnType<typeof setTimeout> | undefined;
 
     const refreshStatsSoon = () => {
       statsTimer ??= setTimeout(() => {
         statsTimer = undefined;
         void queryClient.invalidateQueries({ queryKey: queryKeys.stats });
       }, STATS_REFRESH_DELAY_MS);
+    };
+
+    const refreshLoadingSoon = () => {
+      loadingTimer ??= setTimeout(() => {
+        loadingTimer = undefined;
+        void queryClient.invalidateQueries({ queryKey: queryKeys.loading });
+      }, LOADING_REFRESH_DELAY_MS);
     };
 
     const onReady = () => setConnected(true);
@@ -67,12 +82,28 @@ export function LiveEventsProvider({ children }: { children: ReactNode }) {
       );
     };
 
+    // A vehicle arrived, a sack was counted, a plate was read or fixed: update the live counter
+    // on the camera right away and refetch the loading statistics shortly after.
+    const onSession = (message: MessageEvent<string>) => {
+      const session = JSON.parse(message.data) as LoadingSession;
+      const loading = session.status === "active" ? session : null;
+      const apply = (camera: Camera): Camera =>
+        camera.id === session.camera_id ? { ...camera, runtime: { ...camera.runtime, loading } } : camera;
+      queryClient.setQueryData<Camera[]>(queryKeys.cameras, (cameras) => cameras?.map(apply));
+      queryClient.setQueryData<Camera>(queryKeys.camera(session.camera_id), (camera) =>
+        camera ? apply(camera) : camera,
+      );
+      refreshLoadingSoon();
+    };
+
     source.addEventListener("ready", onReady);
     source.addEventListener("error", onError);
     source.addEventListener("event", onEvent);
     source.addEventListener("camera_status", onStatus);
+    source.addEventListener("session", onSession);
     return () => {
       clearTimeout(statsTimer);
+      clearTimeout(loadingTimer);
       source.close();
     };
   }, [queryClient]);

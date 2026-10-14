@@ -10,22 +10,33 @@ authors = [
 requires-python = ">=3.14"
 dependencies = [
     "asyncpg>=0.32.0",
+    # Number plate detection and OCR (small ONNX models, run on the CPU).
+    "fast-alpr[onnx]>=0.4.0",
     "fastapi>=0.143.0",
     "httpx>=0.28.1",
+    # Excel export of loading sessions.
+    "openpyxl>=3.1.5",
     "opencv-python-headless>=5.0.0.93",
     "pydantic>=2.14.0",
     "pydantic-settings>=2.15.0",
     "sqlalchemy[asyncio]>=2.1.4",
     "sse-starlette>=3.5.0",
     "supervision>=0.30.9",
+    # Listed directly (Ultralytics needs them anyway) so Windows can take the CUDA builds below.
+    "torch>=2.14.1",
+    "torchvision>=0.29.1",
     "trackers>=2.6.1",
+    # IANA time zones for zoneinfo where the OS has none (Windows, slim containers).
+    "tzdata>=2026.5",
     "ultralytics>=8.4.174",
     "uvicorn[standard]>=0.54.0",
+    "watchfiles>=1.3.0",
     "yt-dlp[default]>=2026.8.19",
 ]
 
 [project.scripts]
 yardlens-api = "yardlens_api.main:main"
+db-setup = "yardlens_api.db_setup:main"
 seed = "yardlens_api.seed:main"
 
 [build-system]
@@ -37,6 +48,18 @@ build-backend = "uv_build"
 # Both ship the same `cv2` module, so the GUI wheel is excluded to avoid conflicts.
 override-dependencies = ["opencv-python ; sys_platform == 'never'"]
 
+# PyPI only has CPU builds of PyTorch for Windows, so take the CUDA 13.0 builds there (NVIDIA
+# RTX 20-series and newer; they still run on the CPU without a GPU). PyPI's Linux builds already
+# include CUDA, and macOS uses Metal (MPS), so both keep the default index.
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu130", marker = "sys_platform == 'win32'" }]
+torchvision = [{ index = "pytorch-cu130", marker = "sys_platform == 'win32'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
 [dependency-groups]
 dev = [
     "aiosqlite>=0.22.1",
@@ -44,6 +67,7 @@ dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "ruff>=0.16.10",
+    "types-openpyxl>=3.1.5",
 ]
 
 [tool.ruff]

@@ -18,18 +18,19 @@ class Settings(BaseSettings):
 
     environment: Literal["development", "production", "test"] = "development"
     host: str = "127.0.0.1"
-    port: int = 8000
+    port: int = 8100
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     log_json: bool = False
 
     data_dir: Path = Path("data")
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/yardlens"
     cors_origins: Annotated[list[str], NoDecode] = Field(
-        default_factory=lambda: ["http://localhost:3000", "http://127.0.0.1:3000"]
+        default_factory=lambda: ["http://localhost:3100", "http://127.0.0.1:3100"]
     )
 
     default_model: str = "yolo26n.pt"
     inference_device: str = "auto"
+    inference_threads: int = Field(default=4, ge=1, le=64)
     workers_enabled: bool = True
 
     stream_jpeg_quality: int = Field(default=80, ge=30, le=95)
@@ -37,6 +38,10 @@ class Settings(BaseSettings):
     max_frame_width: int = Field(default=1280, ge=320)
     stream_fps: float = Field(default=15.0, ge=1.0, le=30.0)
     event_retention_days: int = Field(default=7, ge=1)
+    # Loading bays: seconds a vehicle stands in the zone before it counts as arrived, and seconds
+    # with neither a vehicle nor cargo before it counts as gone.
+    loading_arrive_seconds: float = Field(default=15.0, ge=1.0)
+    loading_depart_seconds: float = Field(default=60.0, ge=5.0)
 
     @field_validator("cors_origins", mode="before")
     @classmethod

@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, Cctv, LayoutDashboard, ScanEye, Settings } from "lucide-react";
+import { Activity, Cctv, LayoutDashboard, ScanEye, Settings, Truck } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Suspense } from "react";
@@ -19,14 +19,16 @@ import {
   SidebarRail,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { useI18n } from "@/i18n/provider";
 import { useHealth } from "@/lib/api/queries";
 import { cn } from "@/lib/utils";
 
 export const NAV_ITEMS = [
-  { href: "/", label: "Overview", icon: LayoutDashboard },
-  { href: "/cameras", label: "Cameras", icon: Cctv },
-  { href: "/events", label: "Events", icon: Activity },
-  { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/", key: "overview", icon: LayoutDashboard },
+  { href: "/loading", key: "loading", icon: Truck },
+  { href: "/cameras", key: "cameras", icon: Cctv },
+  { href: "/events", key: "events", icon: Activity },
+  { href: "/settings", key: "settings", icon: Settings },
 ] as const;
 
 export function isActivePath(pathname: string, href: string) {
@@ -35,16 +37,18 @@ export function isActivePath(pathname: string, href: string) {
 
 function NavItems({ pathname }: { pathname: string | null }) {
   const { setOpenMobile } = useSidebar();
+  const { t } = useI18n();
   return (
     <SidebarMenu>
       {NAV_ITEMS.map((item) => {
         const active = pathname !== null && isActivePath(pathname, item.href);
+        const label = t.nav[item.key];
         return (
           <SidebarMenuItem key={item.href}>
-            <SidebarMenuButton asChild isActive={active} tooltip={item.label}>
+            <SidebarMenuButton asChild isActive={active} tooltip={label}>
               <Link href={item.href} aria-current={active ? "page" : undefined} onClick={() => setOpenMobile(false)}>
                 <item.icon aria-hidden />
-                <span>{item.label}</span>
+                <span>{label}</span>
               </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>
@@ -60,6 +64,7 @@ function ActiveNavItems() {
 
 export function AppSidebar() {
   const { setOpenMobile } = useSidebar();
+  const { t } = useI18n();
 
   return (
     <Sidebar collapsible="icon" variant="inset">
@@ -73,7 +78,7 @@ export function AppSidebar() {
                 </span>
                 <span className="grid leading-tight">
                   <span className="font-semibold tracking-tight">YardLens</span>
-                  <span className="text-muted-foreground text-xs">Yard monitoring</span>
+                  <span className="text-muted-foreground text-xs">{t.common.tagline}</span>
                 </span>
               </Link>
             </SidebarMenuButton>
@@ -101,8 +106,9 @@ export function AppSidebar() {
 function ConnectionIndicator() {
   const health = useHealth();
   const { connected } = useLiveEvents();
+  const { t } = useI18n();
   const apiUp = health.isSuccess;
-  const label = !apiUp ? "API offline" : connected ? "Live" : "Connecting…";
+  const label = !apiUp ? t.connection.apiOffline : connected ? t.connection.live : t.connection.connecting;
   const detail = health.data ? `v${health.data.version}` : null;
 
   return (

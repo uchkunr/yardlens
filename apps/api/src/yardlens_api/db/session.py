@@ -33,7 +33,7 @@ def create_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSessi
 
 
 async def init_models(engine: AsyncEngine) -> None:
-    """Create tables for SQLite. PostgreSQL schema is managed by db/schema.sql via psql."""
+    """Create tables for SQLite. PostgreSQL schema is managed by db/schema.sql (``db-setup``)."""
     if engine.dialect.name != "sqlite":
         return
     async with engine.begin() as connection:

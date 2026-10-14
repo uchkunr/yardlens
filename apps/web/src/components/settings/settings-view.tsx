@@ -11,19 +11,15 @@ import { ErrorState } from "@/components/shared/states";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useI18n } from "@/i18n/provider";
 import { useSettings } from "@/lib/api/queries";
 
-const TABS = [
-  { value: "cameras", label: "Cameras" },
-  { value: "detection", label: "Detection" },
-  { value: "integrations", label: "Integrations" },
-  { value: "system", label: "System" },
-] as const;
+const TABS = ["cameras", "detection", "integrations", "system"] as const;
 
-type Tab = (typeof TABS)[number]["value"];
+type Tab = (typeof TABS)[number];
 
 function isTab(value: string | null): value is Tab {
-  return TABS.some((tab) => tab.value === value);
+  return TABS.some((tab) => tab === value);
 }
 
 function SettingsFormSkeleton() {
@@ -52,28 +48,29 @@ export function SettingsView() {
   const requested = searchParams.get("tab");
   const tab: Tab = isTab(requested) ? requested : "cameras";
   const settings = useSettings();
+  const { t } = useI18n();
 
   const settingsPanel = (render: (data: NonNullable<typeof settings.data>) => React.ReactNode) =>
     settings.isPending ? (
       <SettingsFormSkeleton />
     ) : settings.isError ? (
-      <ErrorState title="Couldn't load settings" error={settings.error} onRetry={() => void settings.refetch()} />
+      <ErrorState title={t.errors.loadSettings} error={settings.error} onRetry={() => void settings.refetch()} />
     ) : (
       render(settings.data)
     );
 
   return (
     <>
-      <PageHeader title="Settings" description="Cameras, detection and integrations." />
+      <PageHeader title={t.nav.settings} description={t.settings.description} />
       <Tabs
         value={tab}
         onValueChange={(value) => router.replace(`${pathname}?tab=${value}`, { scroll: false })}
         className="gap-6"
       >
-        <TabsList className="w-full justify-start overflow-x-auto sm:w-fit">
+        <TabsList className="w-full justify-start overflow-x-auto overflow-y-hidden sm:w-fit">
           {TABS.map((item) => (
-            <TabsTrigger key={item.value} value={item.value}>
-              {item.label}
+            <TabsTrigger key={item} value={item}>
+              {t.settings.tabs[item]}
             </TabsTrigger>
           ))}
         </TabsList>

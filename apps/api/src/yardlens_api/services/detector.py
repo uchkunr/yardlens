@@ -1,11 +1,13 @@
 """Shared object detector.
 
 The YOLO model is loaded once per process and shared by every camera worker. Ultralytics models
-are not safe for concurrent ``predict`` calls, so inference is serialized with a lock; a nano model
-handles several cameras at a few FPS each comfortably on CPU.
+are not safe for concurrent ``predict`` calls, so inference is serialized with a lock. ``auto``
+picks an NVIDIA GPU (in half precision) or Apple's Metal when available; on the CPU, PyTorch is
+held to a few threads, because its default of one per core spends far more CPU than it saves.
 """
 
 import logging
+import os
 import threading
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -21,7 +23,24 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# PyTorch's CPU threads (OpenMP) spin for ~200 ms after every parallel region by default. With
+# inference every few tens of milliseconds they never rest, which kept every core busy; waiting
+# passively costs a few milliseconds per frame. OpenMP reads this once, so it has to be set
+# before torch loads (it is imported lazily below).
+os.environ.setdefault("OMP_WAIT_POLICY", "PASSIVE")
+
 AVAILABLE_MODELS: tuple[str, ...] = ("yolo26n.pt", "yolo26s.pt", "yolo26m.pt", "yolo11n.pt")
+
+
+def available_models(models_dir: Path) -> list[str]:
+    """The stock models plus any custom weights (`*.pt`) dropped into `models_dir`."""
+    custom = sorted(
+        path.name
+        for path in models_dir.glob("*.pt")
+        if path.is_file() and path.name not in AVAILABLE_MODELS
+    )
+    return [*AVAILABLE_MODELS, *custom]
+
 
 COCO_CLASSES: tuple[str, ...] = (
     "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
@@ -63,15 +82,23 @@ def resolve_device(requested: str) -> str:
         return requested
     import torch
 
-    return "cuda:0" if torch.cuda.is_available() else "cpu"
+    if torch.cuda.is_available():
+        return "cuda:0"
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
 
 
 class YoloDetector:
-    def __init__(self, *, models_dir: Path, model_name: str, device: str = "auto") -> None:
+    def __init__(
+        self, *, models_dir: Path, model_name: str, device: str = "auto", cpu_threads: int = 4
+    ) -> None:
         self._models_dir = models_dir
         self._model_name = model_name
         self._requested_device = device
         self._device = device
+        self._cpu_threads = cpu_threads
+        self._quantize: int | None = None
         self._model: YOLO | None = None
         self._names: dict[int, str] = dict(enumerate(COCO_CLASSES))
         self._lock = threading.Lock()
@@ -88,20 +115,31 @@ class YoloDetector:
 
     def load(self, model_name: str) -> None:
         """Load (or swap to) a model. Blocking: call from a worker thread, not the event loop."""
+        import torch
         from ultralytics import YOLO  # pyright: ignore[reportMissingTypeStubs]
 
+        # Process-wide. Also bounds the CPU-side work (pre/post-processing) when on a GPU.
+        torch.set_num_threads(self._cpu_threads)
         self._models_dir.mkdir(parents=True, exist_ok=True)
         weights = self._models_dir / model_name
         device = resolve_device(self._requested_device)
-        logger.info("Loading detection model", extra={"model": model_name, "device": device})
+        # Half precision on NVIDIA GPUs; full precision elsewhere (None).
+        quantize = 16 if device.startswith("cuda") else None
+        logger.info(
+            "Loading detection model",
+            extra={"model": model_name, "device": device, "precision": quantize or 32},
+        )
         model = YOLO(str(weights))
         names: dict[int, str] = {int(key): str(value) for key, value in model.names.items()}  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType,reportUnknownArgumentType]
         # Warm up so the first real frame does not pay the graph/kernels initialisation cost.
-        model.predict(np.zeros((640, 640, 3), dtype=np.uint8), device=device, verbose=False)  # pyright: ignore[reportUnknownMemberType]
+        model.predict(  # pyright: ignore[reportUnknownMemberType]
+            np.zeros((640, 640, 3), dtype=np.uint8), device=device, quantize=quantize, verbose=False
+        )
         with self._lock:
             self._model = model
             self._model_name = model_name
             self._device = device
+            self._quantize = quantize
             self._names = names
 
     def detect(
@@ -116,7 +154,12 @@ class YoloDetector:
             if not class_ids:
                 return sv.Detections.empty()
             results = model.predict(  # pyright: ignore[reportUnknownMemberType]
-                frame, conf=confidence, classes=class_ids, device=self._device, verbose=False
+                frame,
+                conf=confidence,
+                classes=class_ids,
+                device=self._device,
+                quantize=self._quantize,
+                verbose=False,
             )
         detections = sv.Detections.from_ultralytics(next(iter(results)))
         detections.data["class_name"] = np.array(

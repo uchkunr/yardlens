@@ -1,8 +1,9 @@
 """Seed demo cameras (``uv run seed``).
 
 Inserts a looped sample traffic video plus a few cameras that their operators publish for public
-viewing. Runs only when the cameras table is empty, so it never re-adds cameras you deleted;
-pass ``--force`` to add any missing demo cameras regardless.
+viewing. Runs once per database: a marker in ``app_settings`` remembers it, so demo cameras you
+delete stay deleted even when ``bun run setup`` runs again. A database that already has cameras
+is never seeded. Pass ``--force`` to add any missing demo cameras regardless.
 """
 
 import argparse
@@ -10,6 +11,7 @@ import asyncio
 import logging
 import sys
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 import httpx
 from sqlalchemy import func, select
@@ -17,7 +19,7 @@ from sqlalchemy import func, select
 from yardlens_api.core.config import Settings, get_settings
 from yardlens_api.core.enums import SourceType
 from yardlens_api.core.logging import configure_logging
-from yardlens_api.db.models import Camera
+from yardlens_api.db.models import AppSetting, Camera
 from yardlens_api.db.session import create_engine, create_session_factory, init_models
 from yardlens_api.schemas.camera import CountingLine
 
@@ -25,6 +27,7 @@ logger = logging.getLogger("yardlens_api.seed")
 
 SAMPLE_VIDEO_URL = "https://media.roboflow.com/supervision/video-examples/vehicles.mp4"
 SAMPLE_VIDEO_NAME = "vehicles.mp4"
+SEEDED_KEY = "demo_seeded"
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +67,10 @@ DEMO_CAMERAS: tuple[DemoCamera, ...] = (
 )
 
 
+def _seeded_marker() -> AppSetting:
+    return AppSetting(key=SEEDED_KEY, value={"seeded_at": datetime.now(UTC).isoformat()})
+
+
 def download_sample_video(settings: Settings) -> bool:
     target = settings.videos_dir / SAMPLE_VIDEO_NAME
     if target.is_file() and target.stat().st_size > 0:
@@ -93,9 +100,13 @@ async def seed(settings: Settings, *, force: bool) -> int:
         await init_models(engine)
         session_factory = create_session_factory(engine)
         async with session_factory() as session:
+            seeded = await session.get(AppSetting, SEEDED_KEY)
             count = await session.scalar(select(func.count()).select_from(Camera)) or 0
-            if count and not force:
-                logger.info("Cameras already configured; skipping seed", extra={"count": count})
+            if not force and (seeded is not None or count):
+                if seeded is None:
+                    session.add(_seeded_marker())
+                    await session.commit()
+                logger.info("Demo cameras were seeded before or cameras exist; skipping seed")
                 return 0
             existing = set((await session.scalars(select(Camera.name))).all())
 
@@ -117,6 +128,8 @@ async def seed(settings: Settings, *, force: bool) -> int:
                     )
                 )
                 added += 1
+            if seeded is None:
+                session.add(_seeded_marker())
             await session.commit()
     finally:
         await engine.dispose()

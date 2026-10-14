@@ -3,24 +3,58 @@
 import asyncio
 import logging
 import time
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 import httpx
 
 from yardlens_api.core.enums import EventType
+from yardlens_api.core.i18n import CAMERA_LABEL, EVENT_TITLES, LOADING_LABELS, Language, class_label
 from yardlens_api.schemas.settings import TelegramSettings
+from yardlens_api.services.plates import format_plate
 
 logger = logging.getLogger(__name__)
 
 TELEGRAM_API = "https://api.telegram.org"
 
-_EVENT_TITLES: dict[EventType, str] = {
-    EventType.OBJECT_ENTERED: "Object detected",
-    EventType.LINE_CROSSED_IN: "Line crossed (in)",
-    EventType.LINE_CROSSED_OUT: "Line crossed (out)",
-    EventType.CAMERA_ONLINE: "Camera online",
-    EventType.CAMERA_OFFLINE: "Camera offline",
-}
+
+# Loading events are one per vehicle and always worth a message, so they skip rate limiting.
+_LOADING_EVENTS = frozenset({EventType.VEHICLE_ARRIVED, EventType.LOADING_COMPLETED})
+
+
+def event_caption(
+    language: Language,
+    event_type: EventType,
+    class_name: str | None,
+    camera_name: str,
+    details: Mapping[str, Any] | None = None,
+) -> str:
+    title = EVENT_TITLES[language][event_type]
+    subject = f" · {class_label(class_name, language)}" if class_name else ""
+    lines = [f"{title}{subject}"]
+    if details and event_type in _LOADING_EVENTS:
+        lines += _loading_lines(language, details)
+    lines.append(f"{CAMERA_LABEL[language]}: {camera_name}")
+    return "\n".join(lines)
+
+
+def _loading_lines(language: Language, details: Mapping[str, Any]) -> list[str]:
+    labels = LOADING_LABELS[language]
+    lines: list[str] = []
+    plate = details.get("plate")
+    if isinstance(plate, str) and plate:
+        lines.append(f"{labels['plate']}: {format_plate(plate)}")
+    loaded = details.get("loaded")
+    if isinstance(loaded, int):
+        lines.append(f"{labels['loaded']}: {loaded}")
+    unloaded = details.get("unloaded")
+    if isinstance(unloaded, int) and unloaded > 0:
+        lines.append(f"{labels['unloaded']}: {unloaded}")
+    duration = details.get("duration_seconds")
+    if isinstance(duration, int):
+        lines.append(f"{labels['duration']}: {max(1, round(duration / 60))} {labels['minutes']}")
+    return lines
 
 
 class TelegramError(Exception):
@@ -53,6 +87,7 @@ class TelegramNotifier:
         event_type: EventType,
         class_name: str | None,
         snapshot: Path | None,
+        details: Mapping[str, Any] | None = None,
     ) -> bool:
         """Send a notification if enabled and not rate limited. Never raises."""
         if not (settings.enabled and settings.bot_token and settings.chat_id):
@@ -62,13 +97,15 @@ class TelegramNotifier:
         key = (camera_id, event_type)
         now = time.monotonic()
         last = self._last_sent.get(key)
-        if last is not None and now - last < settings.min_interval_seconds:
+        if (
+            event_type not in _LOADING_EVENTS
+            and last is not None
+            and now - last < settings.min_interval_seconds
+        ):
             return False
         self._last_sent[key] = now
 
-        title = _EVENT_TITLES[event_type]
-        subject = f" · {class_name}" if class_name else ""
-        caption = f"{title}{subject}\nCamera: {camera_name}"
+        caption = event_caption(settings.language, event_type, class_name, camera_name, details)
         photo = await _read_snapshot(snapshot) if snapshot is not None else None
         try:
             if photo is not None:

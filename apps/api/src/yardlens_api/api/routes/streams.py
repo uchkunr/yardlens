@@ -1,10 +1,12 @@
 import asyncio
+import time
 from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import StreamingResponse
 
 from yardlens_api.api.deps import ContainerDep, SessionDep
+from yardlens_api.core.enums import CameraStatus
 from yardlens_api.core.errors import NotFoundError, UnavailableError
 from yardlens_api.db.models import Camera
 
@@ -12,6 +14,7 @@ router = APIRouter(prefix="/cameras", tags=["streams"])
 
 _BOUNDARY = "yardlensframe"
 _POLL_SECONDS = 0.05
+_RENDER_WAKE_SECONDS = 2.0
 _NO_STORE = {"Cache-Control": "no-store, no-cache, must-revalidate", "Pragma": "no-cache"}
 
 
@@ -79,6 +82,16 @@ async def snapshot(
         jpeg = await asyncio.to_thread(worker.latest_raw_jpeg)
     else:
         _, jpeg = worker.latest_jpeg()
+        # Rendering pauses while nobody watches; the request above restarts it, so an online
+        # camera has a fresh frame within a frame or two.
+        deadline = time.monotonic() + _RENDER_WAKE_SECONDS
+        while (
+            jpeg is None
+            and worker.state().status is CameraStatus.ONLINE
+            and time.monotonic() < deadline
+        ):
+            await asyncio.sleep(_POLL_SECONDS)
+            _, jpeg = worker.latest_jpeg()
     if jpeg is None:
         raise UnavailableError("No frame received yet")
     return Response(content=jpeg, media_type="image/jpeg", headers=_NO_STORE)

@@ -5,19 +5,21 @@ import Link from "next/link";
 import { LiveFeed } from "@/components/shared/live-feed";
 import { StatusDot } from "@/components/shared/status";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useI18n } from "@/i18n/provider";
 import type { Camera } from "@/lib/api/client";
-import { classLabel, sortedCounts, STATUS_LABELS } from "@/lib/format";
+import { sortedCounts } from "@/lib/format";
 
 /** Live tile with name, status and the classes currently in view overlaid on the feed. */
 export function CameraTile({ camera }: { camera: Camera }) {
   const { runtime } = camera;
+  const { t, f } = useI18n();
   const counts = sortedCounts(runtime.visible).slice(0, 4);
 
   return (
     <Link
       href={`/cameras/${camera.id}`}
       className="group bg-card focus-visible:ring-ring/50 block overflow-hidden rounded-xl border shadow-xs transition-shadow outline-none hover:shadow-md focus-visible:ring-[3px]"
-      aria-label={`${camera.name}, ${STATUS_LABELS[runtime.status]}. Open camera`}
+      aria-label={t.cameras.open(camera.name, t.status[runtime.status])}
     >
       <LiveFeed cameraId={camera.id} name={camera.name} status={runtime.status}>
         {counts.length > 0 ? (
@@ -27,7 +29,7 @@ export function CameraTile({ camera }: { camera: Camera }) {
                 key={name}
                 className="rounded-md bg-black/65 px-1.5 py-0.5 text-[11px] font-medium text-white tabular-nums backdrop-blur-sm"
               >
-                {classLabel(name)} {count}
+                {f.className(name)} {count}
               </span>
             ))}
           </div>
@@ -38,8 +40,8 @@ export function CameraTile({ camera }: { camera: Camera }) {
         <span className="truncate text-sm font-medium">{camera.name}</span>
         <span className="text-muted-foreground ml-auto shrink-0 text-xs tabular-nums">
           {runtime.status === "online" && camera.line
-            ? `In ${runtime.line_in} · Out ${runtime.line_out}`
-            : STATUS_LABELS[runtime.status]}
+            ? t.cameras.tileCounts(f.count(runtime.line_in), f.count(runtime.line_out))
+            : t.status[runtime.status]}
         </span>
       </div>
     </Link>

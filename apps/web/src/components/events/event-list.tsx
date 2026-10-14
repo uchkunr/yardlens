@@ -5,8 +5,8 @@ import { ImageOff } from "lucide-react";
 import { EventTypeBadge } from "@/components/shared/status";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useNow } from "@/hooks/use-now";
+import { useI18n } from "@/i18n/provider";
 import type { YardEvent } from "@/lib/api/client";
-import { classLabel, formatDateTime, formatRelative } from "@/lib/format";
 
 export function EventThumbnail({ event, className }: { event: YardEvent; className?: string }) {
   return (
@@ -31,6 +31,7 @@ export function EventList({
   showCamera?: boolean;
 }) {
   const now = useNow();
+  const { f } = useI18n();
   return (
     <ul className="divide-y" aria-live="polite" aria-relevant="additions">
       {events.map((event) => (
@@ -44,12 +45,12 @@ export function EventList({
             <div className="min-w-0 flex-1 space-y-1">
               <div className="flex flex-wrap items-center gap-2">
                 <EventTypeBadge type={event.type} />
-                {event.class_name ? <span className="text-sm font-medium">{classLabel(event.class_name)}</span> : null}
+                {event.class_name ? <span className="text-sm font-medium">{f.className(event.class_name)}</span> : null}
               </div>
               <p className="text-muted-foreground truncate text-xs">
                 {showCamera ? `${event.camera_name} · ` : null}
-                <time dateTime={event.created_at} title={formatDateTime(event.created_at)}>
-                  {formatRelative(event.created_at, now)}
+                <time dateTime={event.created_at} title={f.dateTime(event.created_at)}>
+                  {f.relative(event.created_at, now)}
                 </time>
               </p>
             </div>

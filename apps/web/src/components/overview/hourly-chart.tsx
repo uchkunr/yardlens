@@ -12,25 +12,25 @@ import {
   type ChartConfig,
 } from "@/components/ui/chart";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useI18n } from "@/i18n/provider";
 import type { StatsOverview } from "@/lib/api/client";
-import { formatHour } from "@/lib/format";
-
-const chartConfig = {
-  entered: { label: "Objects", color: "var(--chart-1)" },
-  line_in: { label: "In", color: "var(--chart-2)" },
-  line_out: { label: "Out", color: "var(--chart-3)" },
-} satisfies ChartConfig;
 
 export function HourlyChart({ stats }: { stats: StatsOverview }) {
-  const data = stats.hourly.map((bucket) => ({ ...bucket, label: formatHour(bucket.hour) }));
+  const { t, f } = useI18n();
+  const chartConfig = {
+    entered: { label: t.chart.objects, color: "var(--chart-1)" },
+    line_in: { label: t.chart.in, color: "var(--chart-2)" },
+    line_out: { label: t.chart.out, color: "var(--chart-3)" },
+  } satisfies ChartConfig;
+  const data = stats.hourly.map((bucket) => ({ ...bucket, label: f.hour(bucket.hour) }));
   const total = stats.hourly.reduce((sum, bucket) => sum + bucket.entered, 0);
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Activity, last 24 hours</CardTitle>
+        <CardTitle>{t.chart.title}</CardTitle>
         <CardDescription>
-          {total > 0 ? `${total} objects detected · bars per hour, lines show crossings` : "No detections yet in the last 24 hours"}
+          {total > 0 ? t.chart.description(f.count(total)) : t.chart.empty}
         </CardDescription>
       </CardHeader>
       <CardContent>

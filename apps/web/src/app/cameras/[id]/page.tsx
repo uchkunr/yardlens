@@ -3,8 +3,11 @@ import { notFound } from "next/navigation";
 import { Suspense } from "react";
 
 import { CameraDetail, CameraDetailSkeleton } from "@/components/cameras/camera-detail";
+import { getMessages } from "@/i18n/server";
 
-export const metadata: Metadata = { title: "Camera" };
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getMessages()).meta.camera };
+}
 
 async function CameraDetailRoute({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

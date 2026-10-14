@@ -15,6 +15,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Protocol, cast
 from urllib.parse import urlparse
+from urllib.request import url2pathname
 
 import cv2
 import httpx
@@ -91,6 +92,9 @@ def validate_source(source_type: SourceType, url: str, *, base_dir: Path | None 
 
 def resolve_file_path(url: str, *, base_dir: Path | None = None) -> Path:
     raw = url.removeprefix("file://")
+    if raw != url and raw.startswith("/"):
+        # file:///C:/clips/a.mp4 becomes C:\clips\a.mp4 on Windows; %20 and friends are decoded.
+        raw = url2pathname(raw)
     path = Path(raw).expanduser()
     if not path.is_absolute() and base_dir is not None:
         path = base_dir / path

@@ -113,7 +113,11 @@ async def delete_snapshots_for_camera(
             )
         )
     ).all()
-    await asyncio.to_thread(_remove_files, snapshots_dir, [path for path in paths if path])
+    await remove_snapshot_files(snapshots_dir, [path for path in paths if path])
+
+
+async def remove_snapshot_files(snapshots_dir: Path, relative_paths: Sequence[str]) -> None:
+    await asyncio.to_thread(_remove_files, snapshots_dir, relative_paths)
 
 
 def _remove_files(root: Path, relative_paths: Sequence[str]) -> None:

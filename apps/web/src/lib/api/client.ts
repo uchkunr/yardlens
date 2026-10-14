@@ -18,9 +18,14 @@ export type AppSettings = Schemas["SettingsRead"];
 export type SettingsUpdate = Schemas["SettingsUpdate"];
 export type DetectionSettings = Schemas["DetectionSettings"];
 export type Health = Schemas["HealthRead"];
+export type LoadingZone = Schemas["LoadingZone"];
+export type LoadingSession = Schemas["LoadingSessionRead"];
+export type LoadingSessionPage = Schemas["LoadingSessionPage"];
+export type LoadingSummary = Schemas["LoadingSummary"];
+export type LoadingTotals = Schemas["LoadingTotals"];
 
 /** Direct API origin, used for long-lived connections (MJPEG and SSE). */
-export const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000").replace(
+export const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8100").replace(
   /\/$/,
   "",
 );
@@ -28,10 +33,17 @@ export const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:800
 /** Regular requests go same-origin through the Next.js rewrite to the API. */
 export const api = createClient<paths>({ baseUrl: "" });
 
+/**
+ * `server` errors carry the API's own message; the others are produced here, so the UI can
+ * show them in its language without parsing the text.
+ */
+export type ApiErrorKind = "unreachable" | "unavailable" | "failed" | "server";
+
 export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    readonly kind: ApiErrorKind = "server",
   ) {
     super(message);
     this.name = "ApiError";
@@ -68,22 +80,18 @@ export async function unwrap<T>(request: Promise<FetchResult<T>>): Promise<T> {
   try {
     result = await request;
   } catch {
-    throw new ApiError("Cannot reach the YardLens API", 0);
+    throw new ApiError("Cannot reach the YardLens API", 0, "unreachable");
   }
   const { data, error, response } = result;
   if (!response.ok) {
-    const fallback =
-      response.status >= 500 && response.status !== 503
-        ? "The API is unavailable"
-        : `Request failed (${response.status})`;
-    throw new ApiError(describeError(error, fallback), response.status);
+    const detail = describeError(error, "");
+    if (detail) throw new ApiError(detail, response.status);
+    if (response.status >= 500 && response.status !== 503) {
+      throw new ApiError("The API is unavailable", response.status, "unavailable");
+    }
+    throw new ApiError(`Request failed (${response.status})`, response.status, "failed");
   }
   return data as T;
-}
-
-export function errorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return "Something went wrong";
 }
 
 export function streamUrl(cameraId: number): string {
@@ -99,3 +107,15 @@ export function snapshotUrl(cameraId: number, options: { raw?: boolean; nonce?: 
 }
 
 export const EVENTS_STREAM_URL = `${API_URL}/api/events/stream`;
+
+export type LoadingFilters = { cameraId?: number; plate?: string; since?: string; until?: string };
+
+/** Same-origin download of the loading history as an Excel file. */
+export function loadingExportUrl(filters: LoadingFilters, options: { tz: string; lang: string }) {
+  const params = new URLSearchParams({ tz: options.tz, lang: options.lang });
+  if (filters.cameraId) params.set("camera_id", String(filters.cameraId));
+  if (filters.plate) params.set("plate", filters.plate);
+  if (filters.since) params.set("since", filters.since);
+  if (filters.until) params.set("until", filters.until);
+  return `/api/loading/sessions/export?${params.toString()}`;
+}

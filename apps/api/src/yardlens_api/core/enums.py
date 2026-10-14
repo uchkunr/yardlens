@@ -23,7 +23,16 @@ class EventType(StrEnum):
     LINE_CROSSED_OUT = "line_crossed_out"
     CAMERA_ONLINE = "camera_online"
     CAMERA_OFFLINE = "camera_offline"
+    VEHICLE_ARRIVED = "vehicle_arrived"
+    LOADING_COMPLETED = "loading_completed"
+
+
+class SessionStatus(StrEnum):
+    ACTIVE = "active"
+    COMPLETED = "completed"
 
 
 VEHICLE_CLASSES: frozenset[str] = frozenset({"car", "truck", "bus", "motorcycle", "bicycle"})
+# Vehicles that can park in a loading bay; a custom model should name its truck class "truck".
+LOADING_VEHICLE_CLASSES: frozenset[str] = frozenset({"car", "truck", "bus"})
 DEFAULT_CLASSES: tuple[str, ...] = ("car", "truck", "bus", "motorcycle", "person")

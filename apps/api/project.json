@@ -18,7 +18,7 @@
       ],
       "options": {
         "cwd": "apps/api",
-        "command": "./scripts/db-setup.sh"
+        "command": "uv run db-setup"
       }
     },
     "seed": {
@@ -36,7 +36,7 @@
       "continuous": true,
       "options": {
         "cwd": "apps/api",
-        "command": "uv run uvicorn yardlens_api.main:create_app --factory --reload --reload-dir src --host 127.0.0.1 --port 8000"
+        "command": "uv run yardlens-api --reload"
       }
     },
     "start": {

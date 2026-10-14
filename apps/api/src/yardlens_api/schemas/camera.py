@@ -4,6 +4,7 @@ from typing import Annotated, Self
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from yardlens_api.core.enums import CameraStatus, SourceType
+from yardlens_api.schemas.loading import LoadingSessionRead
 
 Unit = Annotated[float, Field(ge=0.0, le=1.0)]
 CameraName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
@@ -26,6 +27,21 @@ class CountingLine(BaseModel):
         return self
 
 
+class ZonePoint(BaseModel):
+    x: Unit
+    y: Unit
+
+
+class LoadingZone(BaseModel):
+    """Where a vehicle parks while it is loaded, as a polygon in normalized frame coordinates.
+
+    A camera with a zone is a loading bay: vehicles parked in it open a loading session and cargo
+    crossing the counting line is added to that session.
+    """
+
+    points: Annotated[list[ZonePoint], Field(min_length=3, max_length=24)]
+
+
 class CameraCreate(BaseModel):
     name: CameraName
     source_type: SourceType
@@ -33,6 +49,7 @@ class CameraCreate(BaseModel):
     enabled: bool = True
     inference_fps: InferenceFps = 3.0
     line: CountingLine | None = None
+    zone: LoadingZone | None = None
 
 
 class CameraUpdate(BaseModel):
@@ -44,6 +61,7 @@ class CameraUpdate(BaseModel):
     enabled: bool | None = None
     inference_fps: InferenceFps | None = None
     line: CountingLine | None = None
+    zone: LoadingZone | None = None
 
 
 class CameraRuntime(BaseModel):
@@ -56,6 +74,9 @@ class CameraRuntime(BaseModel):
     visible: dict[str, int] = Field(description="Objects currently visible, by class")
     line_in: int = Field(description="Line crossings (in) since the worker started")
     line_out: int = Field(description="Line crossings (out) since the worker started")
+    loading: LoadingSessionRead | None = Field(
+        default=None, description="The loading session in progress, for loading-bay cameras"
+    )
 
 
 class CameraRead(BaseModel):
@@ -68,6 +89,7 @@ class CameraRead(BaseModel):
     enabled: bool
     inference_fps: float
     line: CountingLine | None
+    zone: LoadingZone | None
     created_at: datetime
     updated_at: datetime
     runtime: CameraRuntime

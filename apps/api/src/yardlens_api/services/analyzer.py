@@ -16,7 +16,7 @@ import supervision as sv
 from numpy.typing import NDArray
 from trackers import ByteTrackTracker
 
-from yardlens_api.schemas.camera import CountingLine
+from yardlens_api.schemas.camera import CountingLine, LoadingZone
 
 type Frame = NDArray[np.uint8]
 type Box = tuple[float, float, float, float]
@@ -27,6 +27,7 @@ _VELOCITY_SMOOTHING = 0.7
 # Motion measured across a longer gap (e.g. a track lost and found again) is not trusted.
 _MAX_VELOCITY_GAP_SECONDS = 2.0
 _STILL: Box = (0.0, 0.0, 0.0, 0.0)
+_ZONE_COLOR = (255, 200, 0)  # BGR: light blue, distinct from the yellow counting line
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +41,7 @@ class TrackedObject:
 
 @dataclass(slots=True)
 class Observation:
+    objects: list[TrackedObject] = field(default_factory=list[TrackedObject])
     entered: list[TrackedObject] = field(default_factory=list[TrackedObject])
     crossed_in: list[TrackedObject] = field(default_factory=list[TrackedObject])
     crossed_out: list[TrackedObject] = field(default_factory=list[TrackedObject])
@@ -94,7 +96,14 @@ class LineCounter:
 
 
 class FrameAnalyzer:
-    def __init__(self, *, fps: float, line: CountingLine | None = None, min_hits: int = 1) -> None:
+    def __init__(
+        self,
+        *,
+        fps: float,
+        line: CountingLine | None = None,
+        zone: LoadingZone | None = None,
+        min_hits: int = 1,
+    ) -> None:
         # ByteTrack confirms a track after two consecutive matches; unconfirmed detections come
         # back with tracker_id -1 and are ignored. The lost-track buffer is ~3 s at any rate.
         self._tracker = ByteTrackTracker(
@@ -111,6 +120,7 @@ class FrameAnalyzer:
         self._announced: set[int] = set()
         self._frame_index = 0
         self._counter: LineCounter | None = LineCounter(line) if line else None
+        self.zone = zone
         self._line_in_offset = 0
         self._line_out_offset = 0
         self._annotators: _Annotators | None = None
@@ -146,7 +156,9 @@ class FrameAnalyzer:
         tracked = _confirmed(self._tracker.update(detections))
         objects = _to_objects(tracked)
 
-        observation = Observation(visible=dict(Counter(obj.class_name for obj in objects)))
+        observation = Observation(
+            objects=objects, visible=dict(Counter(obj.class_name for obj in objects))
+        )
         for obj in objects:
             self._hits[obj.tracker_id] += 1
             self._last_seen[obj.tracker_id] = self._frame_index
@@ -208,6 +220,12 @@ class FrameAnalyzer:
             labels = [f"{obj.class_name} #{obj.tracker_id}" for obj in objects]
             scene = annotators.box.annotate(scene, detections)
             scene = annotators.label.annotate(scene, detections, labels=labels)
+        if self.zone:
+            polygon = np.array(
+                [[point.x * width, point.y * height] for point in self.zone.points], dtype=np.int32
+            )
+            thickness = sv.calculate_optimal_line_thickness((width, height))
+            cv2.polylines(scene, [polygon], isClosed=True, color=_ZONE_COLOR, thickness=thickness)
         if self._counter:
             scene = annotators.line.annotate(scene, self._counter.zone_for(width, height))
         return scene

@@ -1,14 +1,16 @@
-import { CircleAlert, Cctv, Plus, RefreshCw } from "lucide-react";
+"use client";
+
+import { CircleAlert, Cctv, Compass, Plus, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
-import { errorMessage } from "@/lib/api/client";
+import { useI18n } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 
 export function ErrorState({
-  title = "Couldn't load data",
+  title,
   error,
   onRetry,
   className,
@@ -18,19 +20,20 @@ export function ErrorState({
   onRetry?: () => void;
   className?: string;
 }) {
+  const { t, f } = useI18n();
   return (
     <Empty className={cn("border", className)}>
       <EmptyHeader>
         <EmptyMedia variant="icon">
           <CircleAlert aria-hidden />
         </EmptyMedia>
-        <EmptyTitle>{title}</EmptyTitle>
-        <EmptyDescription>{errorMessage(error)}</EmptyDescription>
+        <EmptyTitle>{title ?? t.errors.loadData}</EmptyTitle>
+        <EmptyDescription>{f.error(error)}</EmptyDescription>
       </EmptyHeader>
       {onRetry ? (
         <EmptyContent>
           <Button variant="outline" size="sm" onClick={onRetry}>
-            <RefreshCw aria-hidden /> Try again
+            <RefreshCw aria-hidden /> {t.common.tryAgain}
           </Button>
         </EmptyContent>
       ) : null}
@@ -65,17 +68,35 @@ export function EmptyState({
 
 /** First-run state: no cameras configured yet. */
 export function NoCamerasState({ className }: { className?: string }) {
+  const { t } = useI18n();
   return (
     <EmptyState
       className={className}
       icon={<Cctv aria-hidden />}
-      title="Add your first camera"
-      description="Connect an RTSP, HLS, MJPEG/JPEG, YouTube live or local video source. Detections and events appear here within seconds."
+      title={t.noCameras.title}
+      description={t.noCameras.description}
       action={
         <Button asChild>
           <Link href="/settings?tab=cameras&new=1">
-            <Plus aria-hidden /> Add camera
+            <Plus aria-hidden /> {t.noCameras.action}
           </Link>
+        </Button>
+      }
+    />
+  );
+}
+
+export function NotFoundState({ className }: { className?: string }) {
+  const { t } = useI18n();
+  return (
+    <EmptyState
+      className={className}
+      icon={<Compass aria-hidden />}
+      title={t.notFound.title}
+      description={t.notFound.description}
+      action={
+        <Button asChild>
+          <Link href="/">{t.notFound.back}</Link>
         </Button>
       }
     />

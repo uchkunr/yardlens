@@ -16,6 +16,8 @@ from yardlens_api.schemas.settings import TelegramSettings
 from yardlens_api.services.camera_worker import WorkerEvent
 from yardlens_api.services.event_bus import BusMessage, EventBus
 from yardlens_api.services.events import to_event_read
+from yardlens_api.services.loading import SessionState
+from yardlens_api.services.loading_store import row_to_read, save_session
 from yardlens_api.services.notifier import TelegramNotifier
 
 logger = logging.getLogger(__name__)
@@ -43,6 +45,8 @@ class EventRecorder:
         self._snapshots_dir = snapshots_dir
         self._queue: asyncio.Queue[WorkerEvent] = asyncio.Queue(maxsize=10_000)
         self._task: asyncio.Task[None] | None = None
+        self._sessions: asyncio.Queue[SessionState] = asyncio.Queue(maxsize=1_000)
+        self._sessions_task: asyncio.Task[None] | None = None
         self._notifications: set[asyncio.Task[bool]] = set()
 
     def submit(self, event: WorkerEvent) -> None:
@@ -52,19 +56,30 @@ class EventRecorder:
         except asyncio.QueueFull:
             logger.warning("Event queue full; dropping event", extra={"type": event.type.value})
 
+    def submit_session(self, state: SessionState) -> None:
+        """Enqueue a loading session update. Must be called on the event loop thread."""
+        try:
+            self._sessions.put_nowait(state)
+        except asyncio.QueueFull:
+            logger.warning("Session queue full; dropping update", extra={"session_id": state.id})
+
     def publish_status(self, camera_id: int, status: CameraStatus, last_error: str | None) -> None:
         payload = {"camera_id": camera_id, "status": status.value, "last_error": last_error}
         self._bus.publish(BusMessage(kind="camera_status", data=json.dumps(payload)))
 
     def start(self) -> None:
         self._task = asyncio.create_task(self._run(), name="event-recorder")
+        self._sessions_task = asyncio.create_task(self._run_sessions(), name="session-recorder")
 
     async def stop(self) -> None:
-        if self._task is not None:
-            self._task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._task
+        for task in (self._task, self._sessions_task):
+            if task is not None:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
         await self._flush_remaining()
+        while not self._sessions.empty():
+            await self._save_session(self._sessions.get_nowait())
         if self._notifications:
             await asyncio.wait(self._notifications, timeout=5.0)
 
@@ -81,6 +96,22 @@ class EventRecorder:
                 except TimeoutError:
                     break
             await self._persist(batch)
+
+    async def _run_sessions(self) -> None:
+        while True:
+            await self._save_session(await self._sessions.get())
+
+    async def _save_session(self, state: SessionState) -> None:
+        try:
+            async with self._session_factory() as session:
+                row = await save_session(session, state)
+                read = row_to_read(row, self._camera_name(state.camera_id))
+        except SQLAlchemyError:
+            logger.warning(
+                "Could not save loading session", extra={"session_id": state.id}, exc_info=True
+            )
+            return
+        self._bus.publish(BusMessage(kind="session", data=read.model_dump_json()))
 
     async def _flush_remaining(self) -> None:
         batch: list[WorkerEvent] = []
@@ -130,6 +161,7 @@ class EventRecorder:
                 event_type=EventType(row.type),
                 class_name=row.class_name,
                 snapshot=snapshot,
+                details=row.details,
             )
         )
         self._notifications.add(task)

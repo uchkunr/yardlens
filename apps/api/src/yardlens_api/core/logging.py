@@ -4,8 +4,10 @@ import sys
 from datetime import UTC, datetime
 from typing import override
 
+# color_message is uvicorn's ANSI-colored duplicate of the message, passed as an ``extra``.
 _RESERVED_ATTRS = frozenset(
-    logging.LogRecord("", 0, "", 0, "", None, None).__dict__.keys() | {"message", "asctime"}
+    logging.LogRecord("", 0, "", 0, "", None, None).__dict__.keys()
+    | {"message", "asctime", "color_message"}
 )
 
 

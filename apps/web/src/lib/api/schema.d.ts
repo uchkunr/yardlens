@@ -178,7 +178,7 @@ export interface paths {
         };
         /**
          * Stream Events
-         * @description Server-sent events: ``event`` (a new EventRead) and ``camera_status`` messages.
+         * @description Server-sent events: ``event`` (a new EventRead), ``camera_status`` and ``session``.
          */
         get: operations["stream_events_api_events_stream_get"];
         put?: never;
@@ -224,6 +224,87 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/loading/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Loading Summary
+         * @description Today's totals, vehicles in a bay right now, and one entry per day for ``days`` days.
+         */
+        get: operations["loading_summary_api_loading_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/loading/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Loading Sessions
+         * @description Loading history, newest first. ``plate`` matches part of a plate; spaces are ignored.
+         */
+        get: operations["get_loading_sessions_api_loading_sessions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/loading/sessions/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export Loading Sessions
+         * @description The same history as an Excel file, oldest first, with times in ``tz``.
+         */
+        get: operations["export_loading_sessions_api_loading_sessions_export_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/loading/sessions/{session_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Loading Session */
+        get: operations["get_loading_session_api_loading_sessions__session_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Loading Session
+         * @description Fix the plate by hand. The camera will not overwrite a corrected plate.
+         */
+        patch: operations["update_loading_session_api_loading_sessions__session_id__patch"];
         trace?: never;
     };
     "/api/settings": {
@@ -296,6 +377,7 @@ export interface components {
              */
             inference_fps: number;
             line?: components["schemas"]["CountingLine"] | null;
+            zone?: components["schemas"]["LoadingZone"] | null;
         };
         /** CameraRead */
         CameraRead: {
@@ -311,6 +393,7 @@ export interface components {
             /** Inference Fps */
             inference_fps: number;
             line: components["schemas"]["CountingLine"] | null;
+            zone: components["schemas"]["LoadingZone"] | null;
             /**
              * Created At
              * Format: date-time
@@ -353,6 +436,8 @@ export interface components {
              * @description Line crossings (out) since the worker started
              */
             line_out: number;
+            /** @description The loading session in progress, for loading-bay cameras */
+            loading?: components["schemas"]["LoadingSessionRead"] | null;
         };
         /**
          * CameraStatus
@@ -405,6 +490,7 @@ export interface components {
             /** Inference Fps */
             inference_fps?: number | null;
             line?: components["schemas"]["CountingLine"] | null;
+            zone?: components["schemas"]["LoadingZone"] | null;
         };
         /** ClassCount */
         ClassCount: {
@@ -427,6 +513,18 @@ export interface components {
             /** Y2 */
             y2: number;
         };
+        /** DailyLoading */
+        DailyLoading: {
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+            /** Vehicles */
+            vehicles: number;
+            /** Loaded */
+            loaded: number;
+        };
         /** DetectionSettings */
         DetectionSettings: {
             /**
@@ -441,6 +539,11 @@ export interface components {
             confidence: number;
             /** Classes */
             classes?: string[];
+            /**
+             * Cargo Classes
+             * @description Classes counted as cargo on loading-bay cameras; a subset of `classes`
+             */
+            cargo_classes?: string[];
         };
         /** DetectorInfo */
         DetectorInfo: {
@@ -493,7 +596,7 @@ export interface components {
          * EventType
          * @enum {string}
          */
-        EventType: "object_entered" | "line_crossed_in" | "line_crossed_out" | "camera_online" | "camera_offline";
+        EventType: "object_entered" | "line_crossed_in" | "line_crossed_out" | "camera_online" | "camera_offline" | "vehicle_arrived" | "loading_completed";
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -537,6 +640,142 @@ export interface components {
             /** Line Out */
             line_out: number;
         };
+        /** LoadingSessionPage */
+        LoadingSessionPage: {
+            /** Items */
+            items: components["schemas"]["LoadingSessionRead"][];
+            /** Total */
+            total: number;
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+            /** @description Across every session matching the filters */
+            totals: components["schemas"]["LoadingTotals"];
+        };
+        /** LoadingSessionRead */
+        LoadingSessionRead: {
+            /** Id */
+            id: string;
+            /** Camera Id */
+            camera_id: number;
+            /** Camera Name */
+            camera_name: string;
+            status: components["schemas"]["SessionStatus"];
+            /**
+             * Arrived At
+             * Format: date-time
+             * @description When the vehicle pulled into the bay
+             */
+            arrived_at: string;
+            /**
+             * Departed At
+             * @description When it left; null while it is still there
+             */
+            departed_at: string | null;
+            /**
+             * Loading Started At
+             * @description First cargo item counted
+             */
+            loading_started_at: string | null;
+            /**
+             * Loading Finished At
+             * @description Last cargo item counted
+             */
+            loading_finished_at: string | null;
+            /**
+             * Duration Seconds
+             * @description Time in the bay so far, or in total once it left
+             */
+            duration_seconds: number;
+            /**
+             * Loaded
+             * @description Cargo items counted in the loading direction
+             */
+            loaded: number;
+            /**
+             * Unloaded
+             * @description Cargo items counted in the opposite direction
+             */
+            unloaded: number;
+            /** Vehicle Class */
+            vehicle_class: string | null;
+            /**
+             * Plate
+             * @description Normalized plate, e.g. '01A123BC'
+             */
+            plate: string | null;
+            /** Plate Confidence */
+            plate_confidence: number | null;
+            /**
+             * Plate Corrected
+             * @description The plate was entered or fixed by a person
+             */
+            plate_corrected: boolean;
+            /** Vehicle Snapshot Url */
+            vehicle_snapshot_url: string | null;
+            /** Plate Snapshot Url */
+            plate_snapshot_url: string | null;
+        };
+        /** LoadingSessionUpdate */
+        LoadingSessionUpdate: {
+            /**
+             * Plate
+             * @description Correct the plate by hand; empty or null clears it
+             */
+            plate?: string | null;
+        };
+        /** LoadingSummary */
+        LoadingSummary: {
+            /** Timezone */
+            timezone: string;
+            /**
+             * Loading Cameras
+             * @description Cameras set up as loading bays
+             */
+            loading_cameras: number;
+            today: components["schemas"]["LoadingTotals"];
+            /**
+             * Active
+             * @description Vehicles in a bay right now
+             */
+            active: components["schemas"]["LoadingSessionRead"][];
+            /**
+             * Daily
+             * @description One entry per day, oldest first, ending today
+             */
+            daily: components["schemas"]["DailyLoading"][];
+        };
+        /** LoadingTotals */
+        LoadingTotals: {
+            /** Vehicles */
+            vehicles: number;
+            /** Loaded */
+            loaded: number;
+            /** Unloaded */
+            unloaded: number;
+            /**
+             * Average Duration Seconds
+             * @description Mean time in the bay of the vehicles that have left
+             */
+            average_duration_seconds: number | null;
+        };
+        /**
+         * LoadingZone
+         * @description Where a vehicle parks while it is loaded, as a polygon in normalized frame coordinates.
+         *
+         *     A camera with a zone is a loading bay: vehicles parked in it open a loading session and cargo
+         *     crossing the counting line is added to that session.
+         */
+        LoadingZone: {
+            /** Points */
+            points: components["schemas"]["ZonePoint"][];
+        };
+        /**
+         * SessionStatus
+         * @enum {string}
+         */
+        SessionStatus: "active" | "completed";
         /** SettingsRead */
         SettingsRead: {
             detection: components["schemas"]["DetectionSettings"];
@@ -598,6 +837,12 @@ export interface components {
             notify_events: components["schemas"]["EventType"][];
             /** Min Interval Seconds */
             min_interval_seconds: number;
+            /**
+             * Language
+             * @description Language of the notification text
+             * @enum {string}
+             */
+            language: "ru" | "en";
         };
         /** TelegramSettingsUpdate */
         TelegramSettingsUpdate: {
@@ -614,6 +859,8 @@ export interface components {
             notify_events?: components["schemas"]["EventType"][] | null;
             /** Min Interval Seconds */
             min_interval_seconds?: number | null;
+            /** Language */
+            language?: ("ru" | "en") | null;
         };
         /**
          * TelegramTestRequest
@@ -624,6 +871,8 @@ export interface components {
             bot_token?: string | null;
             /** Chat Id */
             chat_id?: string | null;
+            /** Language */
+            language?: ("ru" | "en") | null;
         };
         /** TelegramTestResult */
         TelegramTestResult: {
@@ -644,6 +893,13 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /** ZonePoint */
+        ZonePoint: {
+            /** X */
+            x: number;
+            /** Y */
+            y: number;
         };
     };
     responses: never;
@@ -1094,6 +1350,176 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StatsOverview"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    loading_summary_api_loading_summary_get: {
+        parameters: {
+            query?: {
+                tz?: string;
+                days?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoadingSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_loading_sessions_api_loading_sessions_get: {
+        parameters: {
+            query?: {
+                camera_id?: number | null;
+                plate?: string | null;
+                since?: string | null;
+                until?: string | null;
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoadingSessionPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_loading_sessions_api_loading_sessions_export_get: {
+        parameters: {
+            query?: {
+                camera_id?: number | null;
+                plate?: string | null;
+                since?: string | null;
+                until?: string | null;
+                tz?: string;
+                lang?: "ru" | "en";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Excel workbook */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_loading_session_api_loading_sessions__session_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoadingSessionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_loading_session_api_loading_sessions__session_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoadingSessionUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoadingSessionRead"];
                 };
             };
             /** @description Validation Error */

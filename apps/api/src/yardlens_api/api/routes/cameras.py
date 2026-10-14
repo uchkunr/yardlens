@@ -19,9 +19,11 @@ from yardlens_api.schemas.camera import (
     CameraTestResult,
     CameraUpdate,
     CountingLine,
+    LoadingZone,
 )
 from yardlens_api.services.camera_worker import CameraConfig, encode_jpeg
-from yardlens_api.services.events import delete_snapshots_for_camera
+from yardlens_api.services.events import delete_snapshots_for_camera, remove_snapshot_files
+from yardlens_api.services.loading_store import session_snapshot_paths, to_session_read
 from yardlens_api.services.sources import open_reader, resolve_source, validate_source
 
 logger = logging.getLogger(__name__)
@@ -41,6 +43,7 @@ def camera_config(camera: Camera) -> CameraConfig:
         url=camera.url,
         inference_fps=camera.inference_fps,
         line=CountingLine.model_validate(camera.line) if camera.line else None,
+        zone=LoadingZone.model_validate(camera.zone) if camera.zone else None,
     )
 
 
@@ -54,6 +57,7 @@ def to_camera_read(camera: Camera, container: Container) -> CameraRead:
         enabled=camera.enabled,
         inference_fps=camera.inference_fps,
         line=CountingLine.model_validate(camera.line) if camera.line else None,
+        zone=LoadingZone.model_validate(camera.zone) if camera.zone else None,
         created_at=camera.created_at,
         updated_at=camera.updated_at,
         runtime=CameraRuntime(
@@ -66,6 +70,7 @@ def to_camera_read(camera: Camera, container: Container) -> CameraRead:
             visible=state.visible,
             line_in=state.line_in,
             line_out=state.line_out,
+            loading=to_session_read(state.loading, camera.name) if state.loading else None,
         ),
     )
 
@@ -110,6 +115,7 @@ async def create_camera(
         enabled=payload.enabled,
         inference_fps=payload.inference_fps,
         line=payload.line.model_dump() if payload.line else None,
+        zone=payload.zone.model_dump() if payload.zone else None,
     )
     session.add(camera)
     await _commit(session)
@@ -204,6 +210,8 @@ async def update_camera(
         camera.inference_fps = payload.inference_fps
     if "line" in changes:
         camera.line = payload.line.model_dump() if payload.line else None
+    if "zone" in changes:
+        camera.zone = payload.zone.model_dump() if payload.zone else None
 
     await _commit(session)
     await session.refresh(camera)
@@ -239,6 +247,9 @@ async def delete_camera(camera_id: int, container: ContainerDep, session: Sessio
     camera = await _get_camera(session, camera_id)
     container.cameras.remove(camera_id)
     await delete_snapshots_for_camera(session, camera_id, container.settings.snapshots_dir)
+    await remove_snapshot_files(
+        container.settings.snapshots_dir, await session_snapshot_paths(session, camera_id)
+    )
     await session.delete(camera)
     await session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

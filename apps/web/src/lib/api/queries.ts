@@ -9,9 +9,10 @@ import {
 } from "@tanstack/react-query";
 import { toast } from "sonner";
 
+import type { Locale } from "@/i18n/config";
+import { useI18n } from "@/i18n/provider";
 import {
   api,
-  errorMessage,
   unwrap,
   type AppSettings,
   type Camera,
@@ -19,6 +20,7 @@ import {
   type CameraUpdate,
   type EventPage,
   type EventType,
+  type LoadingFilters,
   type SettingsUpdate,
   type SourceType,
   type YardEvent,
@@ -42,7 +44,17 @@ export const queryKeys = {
   recentEvents: (cameraId?: number) => ["events", "recent", cameraId ?? "all"] as const,
   stats: ["stats"] as const,
   settings: ["settings"] as const,
+  loading: ["loading"] as const,
+  loadingSummary: (days: number) => ["loading", "summary", days] as const,
+  loadingSessions: (filters: LoadingSessionFilters) => ["loading", "sessions", filters] as const,
 };
+
+export type LoadingSessionFilters = LoadingFilters & { page: number; pageSize: number };
+
+/** The browser's IANA time zone, which defines "today" for the statistics. */
+export function browserTimeZone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone;
+}
 
 export const RECENT_EVENTS_LIMIT = 20;
 
@@ -113,11 +125,56 @@ export function useRecentEvents(cameraId?: number) {
 export function useStats() {
   return useQuery({
     queryKey: queryKeys.stats,
-    queryFn: () => {
-      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      return unwrap(api.GET("/api/stats/overview", { params: { query: { tz } } }));
-    },
+    queryFn: () => unwrap(api.GET("/api/stats/overview", { params: { query: { tz: browserTimeZone() } } })),
     refetchInterval: 30_000,
+  });
+}
+
+export function useLoadingSummary(days = 14) {
+  return useQuery({
+    queryKey: queryKeys.loadingSummary(days),
+    queryFn: () =>
+      unwrap(api.GET("/api/loading/summary", { params: { query: { tz: browserTimeZone(), days } } })),
+    refetchInterval: 30_000,
+  });
+}
+
+export function useLoadingSessions(filters: LoadingSessionFilters) {
+  return useQuery({
+    queryKey: queryKeys.loadingSessions(filters),
+    queryFn: () =>
+      unwrap(
+        api.GET("/api/loading/sessions", {
+          params: {
+            query: {
+              camera_id: filters.cameraId,
+              plate: filters.plate || undefined,
+              since: filters.since,
+              until: filters.until,
+              page: filters.page,
+              page_size: filters.pageSize,
+            },
+          },
+        }),
+      ),
+    placeholderData: keepPreviousData,
+    refetchInterval: 30_000,
+  });
+}
+
+export function useUpdateLoadingPlate() {
+  const queryClient = useQueryClient();
+  const { t, f } = useI18n();
+  return useMutation({
+    mutationFn: ({ id, plate }: { id: string; plate: string | null }) =>
+      unwrap(
+        api.PATCH("/api/loading/sessions/{session_id}", { params: { path: { session_id: id } }, body: { plate } }),
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.loading });
+      toast.success(t.toasts.plateSaved);
+    },
+    onError: (error) => toast.error(t.toasts.plateFailed, { description: f.error(error) }),
   });
 }
 
@@ -141,33 +198,36 @@ function upsertCamera(queryClient: QueryClient, camera: Camera) {
 
 export function useCreateCamera() {
   const queryClient = useQueryClient();
+  const { t, f } = useI18n();
   return useMutation({
     mutationFn: (body: CameraCreate) => unwrap(api.POST("/api/cameras", { body })),
     onSuccess: (camera) => {
       upsertCamera(queryClient, camera);
       void queryClient.invalidateQueries({ queryKey: queryKeys.stats });
-      toast.success(`Camera "${camera.name}" added`);
+      toast.success(t.toasts.cameraAdded(camera.name));
     },
-    onError: (error) => toast.error("Could not add camera", { description: errorMessage(error) }),
+    onError: (error) => toast.error(t.toasts.addFailed, { description: f.error(error) }),
   });
 }
 
 export function useUpdateCamera() {
   const queryClient = useQueryClient();
+  const { t, f } = useI18n();
   return useMutation({
     mutationFn: ({ id, body }: { id: number; body: CameraUpdate }) =>
       unwrap(api.PATCH("/api/cameras/{camera_id}", { params: { path: { camera_id: id } }, body })),
     onSuccess: (camera) => {
       upsertCamera(queryClient, camera);
-      toast.success(`Camera "${camera.name}" saved`);
+      toast.success(t.toasts.cameraSaved(camera.name));
     },
-    onError: (error) => toast.error("Could not save camera", { description: errorMessage(error) }),
+    onError: (error) => toast.error(t.toasts.saveFailed, { description: f.error(error) }),
   });
 }
 
 /** Enable/disable with an optimistic status flip; rolled back if the request fails. */
 export function useToggleCamera() {
   const queryClient = useQueryClient();
+  const { t, f } = useI18n();
   return useMutation({
     mutationFn: ({ id, enabled }: { id: number; enabled: boolean }) =>
       unwrap(
@@ -193,17 +253,18 @@ export function useToggleCamera() {
     },
     onError: (error, _variables, context) => {
       if (context?.previous) queryClient.setQueryData(queryKeys.cameras, context.previous);
-      toast.error("Could not change camera state", { description: errorMessage(error) });
+      toast.error(t.toasts.toggleFailed, { description: f.error(error) });
     },
     onSuccess: (camera) => {
       upsertCamera(queryClient, camera);
-      toast.success(`${camera.name} ${camera.enabled ? "enabled" : "disabled"}`);
+      toast.success((camera.enabled ? t.toasts.cameraEnabled : t.toasts.cameraDisabled)(camera.name));
     },
   });
 }
 
 export function useDeleteCamera() {
   const queryClient = useQueryClient();
+  const { t, f } = useI18n();
   return useMutation({
     mutationFn: (camera: Camera) =>
       unwrap(api.DELETE("/api/cameras/{camera_id}", { params: { path: { camera_id: camera.id } } })),
@@ -217,27 +278,29 @@ export function useDeleteCamera() {
     },
     onError: (error, _camera, context) => {
       if (context?.previous) queryClient.setQueryData(queryKeys.cameras, context.previous);
-      toast.error("Could not delete camera", { description: errorMessage(error) });
+      toast.error(t.toasts.deleteFailed, { description: f.error(error) });
     },
     onSuccess: (_data, camera) => {
       queryClient.removeQueries({ queryKey: queryKeys.camera(camera.id) });
       void queryClient.invalidateQueries({ queryKey: ["events"] });
       void queryClient.invalidateQueries({ queryKey: queryKeys.stats });
-      toast.success(`Camera "${camera.name}" deleted`);
+      toast.success(t.toasts.cameraDeleted(camera.name));
     },
   });
 }
 
 export function useTestCamera() {
+  const { t, f } = useI18n();
   return useMutation({
     mutationFn: (body: { source_type: SourceType; url: string }) =>
       unwrap(api.POST("/api/cameras/test", { body: { ...body, timeout_seconds: 15 } })),
-    onError: (error) => toast.error("Connection test failed", { description: errorMessage(error) }),
+    onError: (error) => toast.error(t.toasts.testFailed, { description: f.error(error) }),
   });
 }
 
 export function useUpdateSettings(successMessage: string) {
   const queryClient = useQueryClient();
+  const { t, f } = useI18n();
   return useMutation({
     mutationFn: (body: SettingsUpdate) => unwrap(api.PUT("/api/settings", { body })),
     onSuccess: (settings: AppSettings) => {
@@ -245,19 +308,20 @@ export function useUpdateSettings(successMessage: string) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.health });
       toast.success(successMessage);
     },
-    onError: (error) => toast.error("Could not save settings", { description: errorMessage(error) }),
+    onError: (error) => toast.error(t.toasts.settingsFailed, { description: f.error(error) }),
   });
 }
 
 export function useTestTelegram() {
+  const { t, f } = useI18n();
   return useMutation({
-    mutationFn: (body: { bot_token?: string; chat_id?: string }) =>
+    mutationFn: (body: { bot_token?: string; chat_id?: string; language?: Locale }) =>
       unwrap(api.POST("/api/settings/telegram/test", { body })),
     onSuccess: (result) => {
-      if (result.success) toast.success(result.message);
-      else toast.error("Telegram test failed", { description: result.message });
+      if (result.success) toast.success(f.server(result.message));
+      else toast.error(t.toasts.telegramTestFailed, { description: f.server(result.message) });
     },
-    onError: (error) => toast.error("Telegram test failed", { description: errorMessage(error) }),
+    onError: (error) => toast.error(t.toasts.telegramTestFailed, { description: f.error(error) }),
   });
 }
 

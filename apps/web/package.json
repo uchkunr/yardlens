@@ -4,13 +4,13 @@
   "private": true,
   "license": "AGPL-3.0-only",
   "scripts": {
-    "dev": "next dev --port 3000",
+    "dev": "next dev --port 3100",
     "build": "next build",
-    "start": "next start --port 3000",
+    "start": "next start --port 3100",
     "lint": "eslint --max-warnings=0",
     "typecheck": "next typegen && tsc --noEmit",
     "test": "bun test",
-    "gen:api": "openapi-typescript ${API_URL:-http://localhost:8000}/openapi.json -o src/lib/api/schema.d.ts"
+    "gen:api": "bun scripts/gen-api.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.9.1",

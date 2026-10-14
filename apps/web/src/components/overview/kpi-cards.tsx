@@ -5,10 +5,10 @@ import type { ReactNode } from "react";
 
 import { Card, CardAction, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useI18n } from "@/i18n/provider";
 import type { StatsOverview } from "@/lib/api/client";
-import { formatCount } from "@/lib/format";
 
-function Kpi({
+export function Kpi({
   label,
   value,
   icon,
@@ -32,33 +32,34 @@ function Kpi({
 }
 
 export function KpiCards({ stats }: { stats: StatsOverview }) {
+  const { t, f } = useI18n();
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <Kpi
-        label="Vehicles today"
-        value={formatCount(stats.vehicles_today)}
+        label={t.kpi.vehiclesToday}
+        value={f.count(stats.vehicles_today)}
         icon={<Car aria-hidden />}
-        footer={`${formatCount(stats.objects_today)} objects detected in total`}
+        footer={t.kpi.objectsTotal(f.count(stats.objects_today))}
       />
       <Kpi
-        label="Line crossings today"
+        label={t.kpi.crossingsToday}
         value={
           <span className="flex items-baseline gap-3">
             <span className="flex items-baseline gap-1">
-              <ArrowDownRight className="text-chart-2 size-5 self-center" aria-label="In" />
-              {formatCount(stats.line_in_today)}
+              <ArrowDownRight className="text-chart-2 size-5 self-center" aria-label={t.kpi.in} />
+              {f.count(stats.line_in_today)}
             </span>
             <span className="flex items-baseline gap-1">
-              <ArrowUpRight className="text-chart-3 size-5 self-center" aria-label="Out" />
-              {formatCount(stats.line_out_today)}
+              <ArrowUpRight className="text-chart-3 size-5 self-center" aria-label={t.kpi.out} />
+              {f.count(stats.line_out_today)}
             </span>
           </span>
         }
         icon={<Activity aria-hidden />}
-        footer="In / out across all counting lines"
+        footer={t.kpi.crossingsFooter}
       />
       <Kpi
-        label="Cameras online"
+        label={t.kpi.camerasOnline}
         value={
           <>
             {stats.cameras_online}
@@ -68,17 +69,17 @@ export function KpiCards({ stats }: { stats: StatsOverview }) {
         icon={<Cctv aria-hidden />}
         footer={
           stats.cameras_total === 0
-            ? "No cameras configured"
+            ? t.kpi.noCameras
             : stats.cameras_online === stats.cameras_total
-              ? "All cameras streaming"
-              : `${stats.cameras_total - stats.cameras_online} not streaming`
+              ? t.kpi.allStreaming
+              : t.kpi.notStreaming(f.count(stats.cameras_total - stats.cameras_online))
         }
       />
       <Kpi
-        label="Events last hour"
-        value={formatCount(stats.events_last_hour)}
+        label={t.kpi.eventsLastHour}
+        value={f.count(stats.events_last_hour)}
         icon={<Activity aria-hidden />}
-        footer="Detections, crossings and status changes"
+        footer={t.kpi.eventsFooter}
       />
     </div>
   );

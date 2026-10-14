@@ -52,7 +52,9 @@ def test_validate_rejects_invalid_urls(source_type: SourceType, url: str, messag
 
 def test_file_paths_resolve_relative_to_base_dir(tmp_path: Path) -> None:
     assert resolve_file_path("videos/a.mp4", base_dir=tmp_path) == tmp_path / "videos/a.mp4"
-    assert resolve_file_path("file:///srv/a.mp4", base_dir=tmp_path) == Path("/srv/a.mp4")
+    # as_uri() is file:///C:/... on Windows and file:///tmp/... elsewhere.
+    clip = tmp_path / "clips" / "a b.mp4"
+    assert resolve_file_path(clip.as_uri(), base_dir=Path("elsewhere")) == clip
 
 
 def test_resolve_youtube_uses_resolver() -> None:

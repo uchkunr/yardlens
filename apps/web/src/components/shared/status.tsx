@@ -1,6 +1,8 @@
+"use client";
+
 import { Badge } from "@/components/ui/badge";
+import { useI18n } from "@/i18n/provider";
 import type { CameraStatus, EventType } from "@/lib/api/client";
-import { EVENT_TYPE_LABELS, STATUS_LABELS } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 const DOT_COLORS: Record<CameraStatus, string> = {
@@ -24,10 +26,11 @@ export function StatusDot({ status, className }: { status: CameraStatus; classNa
 }
 
 export function StatusBadge({ status, className }: { status: CameraStatus; className?: string }) {
+  const { t } = useI18n();
   return (
     <Badge variant="outline" className={cn("gap-1.5 font-normal", className)}>
       <StatusDot status={status} />
-      {STATUS_LABELS[status]}
+      {t.status[status]}
     </Badge>
   );
 }
@@ -38,12 +41,15 @@ const EVENT_TONES: Record<EventType, string> = {
   line_crossed_out: "bg-chart-3/15 text-chart-3 border-chart-3/30",
   camera_online: "bg-success/12 text-success border-success/25",
   camera_offline: "bg-destructive/10 text-destructive border-destructive/25",
+  vehicle_arrived: "bg-chart-4/12 text-chart-4 border-chart-4/25",
+  loading_completed: "bg-success/12 text-success border-success/25",
 };
 
 export function EventTypeBadge({ type, className }: { type: EventType; className?: string }) {
+  const { t } = useI18n();
   return (
     <Badge variant="outline" className={cn("font-normal whitespace-nowrap", EVENT_TONES[type], className)}>
-      {EVENT_TYPE_LABELS[type]}
+      {t.eventTypes[type]}
     </Badge>
   );
 }

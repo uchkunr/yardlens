@@ -14,11 +14,14 @@ from yardlens_api.services.camera_worker import (
     WorkerOptions,
 )
 from yardlens_api.services.detector import Detector
+from yardlens_api.services.loading import SessionState
+from yardlens_api.services.plates import PlateReader
 
 logger = logging.getLogger(__name__)
 
 type EventHandler = Callable[[WorkerEvent], None]
 type StatusHandler = Callable[[int, CameraStatus, str | None], None]
+type SessionHandler = Callable[[SessionState], None]
 
 _DISABLED_STATE = RuntimeState(
     status=CameraStatus.DISABLED,
@@ -40,6 +43,8 @@ class CameraManager:
         loop: asyncio.AbstractEventLoop,
         on_event: EventHandler,
         on_status: StatusHandler,
+        on_session: SessionHandler | None = None,
+        plate_reader: PlateReader | None = None,
         names: dict[int, str] | None = None,
         workers_enabled: bool = True,
     ) -> None:
@@ -49,6 +54,8 @@ class CameraManager:
         self._loop = loop
         self._on_event = on_event
         self._on_status = on_status
+        self._on_session = on_session
+        self._plate_reader = plate_reader
         self._workers_enabled = workers_enabled
         self._workers: dict[int, CameraWorker] = {}
         self._names = names if names is not None else {}
@@ -61,6 +68,10 @@ class CameraManager:
 
     def on_status(self, camera_id: int, status: CameraStatus, last_error: str | None) -> None:
         self._loop.call_soon_threadsafe(self._on_status, camera_id, status, last_error)
+
+    def on_session(self, session: SessionState) -> None:
+        if self._on_session is not None:
+            self._loop.call_soon_threadsafe(self._on_session, session)
 
     # -- lifecycle -----------------------------------------------------------------------------
 
@@ -87,6 +98,7 @@ class CameraManager:
             detection_settings=self._detection_settings,
             listener=self,
             options=self._options,
+            plate_reader=self._plate_reader,
         )
         self._workers[config.id] = worker
         worker.start()
@@ -129,7 +141,7 @@ class CameraManager:
 
 
 def _needs_restart(old: CameraConfig, new: CameraConfig) -> bool:
-    """Name and counting line can be changed live; source and rate changes need a new worker."""
+    """Name, counting line and loading zone change live; source and rate need a new worker."""
     return (old.source_type, old.url, old.inference_fps) != (
         new.source_type,
         new.url,

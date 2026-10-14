@@ -1,15 +1,15 @@
 "use client";
 
-import { addDays, format, parseISO, startOfDay } from "date-fns";
-import { CalendarDays, X } from "lucide-react";
-import type { DateRange } from "react-day-picker";
+import { X } from "lucide-react";
 
+import { DateRangePicker } from "@/components/shared/date-range-picker";
 import { Button } from "@/components/ui/button";
-import { Calendar } from "@/components/ui/calendar";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useI18n } from "@/i18n/provider";
 import type { Camera, EventType } from "@/lib/api/client";
-import { classLabel, EVENT_TYPE_LABELS, EVENT_TYPES } from "@/lib/format";
+import { EVENT_TYPES } from "@/lib/format";
+
+export { dateRangeToQuery } from "@/components/shared/date-range-picker";
 
 export type EventsFilterState = {
   cameraId?: number;
@@ -22,21 +22,6 @@ export type EventsFilterState = {
 
 const ALL = "all";
 
-/** Convert inclusive local calendar dates to the API's `[since, until)` ISO range. */
-export function dateRangeToQuery(from?: string, to?: string): { since?: string; until?: string } {
-  return {
-    since: from ? startOfDay(parseISO(from)).toISOString() : undefined,
-    until: to ? addDays(startOfDay(parseISO(to)), 1).toISOString() : undefined,
-  };
-}
-
-function rangeLabel(from?: string, to?: string) {
-  if (!from) return "Any date";
-  const start = format(parseISO(from), "MMM d");
-  if (!to || to === from) return start;
-  return `${start} – ${format(parseISO(to), "MMM d")}`;
-}
-
 export function EventsFilters({
   value,
   onChange,
@@ -48,22 +33,20 @@ export function EventsFilters({
   cameras: Camera[];
   classes: string[];
 }) {
-  const selectedRange: DateRange | undefined = value.from
-    ? { from: parseISO(value.from), to: value.to ? parseISO(value.to) : undefined }
-    : undefined;
   const active = Boolean(value.cameraId ?? value.type ?? value.className ?? value.from);
+  const { t, f } = useI18n();
 
   return (
-    <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Event filters">
+    <div className="flex flex-wrap items-center gap-2" role="group" aria-label={t.filters.group}>
       <Select
         value={value.cameraId ? String(value.cameraId) : ALL}
         onValueChange={(next) => onChange({ ...value, cameraId: next === ALL ? undefined : Number(next) })}
       >
-        <SelectTrigger className="w-44" aria-label="Camera">
+        <SelectTrigger className="w-44" aria-label={t.filters.camera}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value={ALL}>All cameras</SelectItem>
+          <SelectItem value={ALL}>{t.filters.allCameras}</SelectItem>
           {cameras.map((camera) => (
             <SelectItem key={camera.id} value={String(camera.id)}>
               {camera.name}
@@ -76,14 +59,14 @@ export function EventsFilters({
         value={value.type ?? ALL}
         onValueChange={(next) => onChange({ ...value, type: next === ALL ? undefined : (next as EventType) })}
       >
-        <SelectTrigger className="w-40" aria-label="Event type">
+        <SelectTrigger className="w-40" aria-label={t.filters.type}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value={ALL}>All types</SelectItem>
+          <SelectItem value={ALL}>{t.filters.allTypes}</SelectItem>
           {EVENT_TYPES.map((type) => (
             <SelectItem key={type} value={type}>
-              {EVENT_TYPE_LABELS[type]}
+              {t.eventTypes[type]}
             </SelectItem>
           ))}
         </SelectContent>
@@ -93,46 +76,24 @@ export function EventsFilters({
         value={value.className ?? ALL}
         onValueChange={(next) => onChange({ ...value, className: next === ALL ? undefined : next })}
       >
-        <SelectTrigger className="w-36" aria-label="Object class">
+        <SelectTrigger className="w-36" aria-label={t.filters.class}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value={ALL}>All classes</SelectItem>
+          <SelectItem value={ALL}>{t.filters.allClasses}</SelectItem>
           {classes.map((name) => (
             <SelectItem key={name} value={name}>
-              {classLabel(name)}
+              {f.className(name)}
             </SelectItem>
           ))}
         </SelectContent>
       </Select>
 
-      <Popover>
-        <PopoverTrigger asChild>
-          <Button variant="outline" className="min-w-40 justify-start font-normal" aria-label="Date range">
-            <CalendarDays aria-hidden />
-            {rangeLabel(value.from, value.to)}
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent className="w-auto p-0" align="start">
-          <Calendar
-            mode="range"
-            numberOfMonths={1}
-            selected={selectedRange}
-            disabled={{ after: new Date() }}
-            onSelect={(range) =>
-              onChange({
-                ...value,
-                from: range?.from ? format(range.from, "yyyy-MM-dd") : undefined,
-                to: range?.to ? format(range.to, "yyyy-MM-dd") : undefined,
-              })
-            }
-          />
-        </PopoverContent>
-      </Popover>
+      <DateRangePicker from={value.from} to={value.to} onChange={(range) => onChange({ ...value, ...range })} />
 
       {active ? (
         <Button variant="ghost" onClick={() => onChange({})}>
-          <X aria-hidden /> Reset
+          <X aria-hidden /> {t.filters.reset}
         </Button>
       ) : null}
     </div>
