@@ -76,6 +76,7 @@ from yardlens_api.services.settings_store import SettingsStore
 logger = logging.getLogger(__name__)
 
 _RETENTION_INTERVAL_SECONDS = 3600
+_REVOCATION_INTERVAL_SECONDS = 60
 _SOURCE_DIR = Path(__file__).parent
 
 
@@ -96,6 +97,7 @@ def create_app(
             tasks.spawn(_load_model(container), "model-loader")
         await _ensure_admin(container)
         tasks.spawn(_retention_loop(container), "retention")
+        tasks.spawn(_revocation_loop(container), "revocations")
         container.monitor.start()
         container.recorder.start()
         await _start_workers(container)
@@ -361,6 +363,17 @@ async def _retention_loop(container: Container) -> None:
         except Exception:
             logger.exception("Retention cleanup failed")
         await asyncio.sleep(_RETENTION_INTERVAL_SECONDS)
+
+
+async def _revocation_loop(container: Container) -> None:
+    """Sessions revoked by another process (``yardlens-admin set-password``) are only in the
+    database; pick them up so their access tokens stop working here too."""
+    while True:
+        await asyncio.sleep(_REVOCATION_INTERVAL_SECONDS)
+        try:
+            await container.auth.load_revocations()
+        except Exception:
+            logger.warning("Could not reload revoked sessions", exc_info=True)
 
 
 class _TaskGroup:

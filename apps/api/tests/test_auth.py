@@ -1,5 +1,6 @@
 """Signing in, staying signed in, and the ways in that must stay shut."""
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 
 import httpx
@@ -195,3 +196,16 @@ async def test_cookies_are_secure_behind_https(settings: Settings) -> None:
         response = await login(http)
         for header in response.headers.get_list("set-cookie"):
             assert "Secure" in header, header
+
+
+async def test_parallel_guesses_from_one_address_meet_the_throttle(
+    anon_client: httpx.AsyncClient,
+) -> None:
+    """Attempts from one address are checked one at a time, so a burst cannot slip past the delay
+    while the first attempts are still being verified."""
+    wrong = {"username": ADMIN_USERNAME, "password": "guess"}
+    responses = await asyncio.gather(
+        *(anon_client.post("/api/auth/login", json=wrong) for _ in range(8))
+    )
+    codes = sorted(response.status_code for response in responses)
+    assert codes == [401, 401, 401, 429, 429, 429, 429, 429]

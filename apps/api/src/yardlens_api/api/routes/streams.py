@@ -1,6 +1,7 @@
 import asyncio
 import time
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import StreamingResponse
@@ -43,7 +44,7 @@ async def stream_mjpeg(
     async def frames() -> AsyncIterator[bytes]:
         last_seq = -1
         while not await request.is_disconnected():
-            if container.auth.is_revoked(user.family_id):
+            if container.auth.is_revoked(user.family_id) or datetime.now(UTC) >= user.expires_at:
                 return
             worker = container.cameras.live(camera_id)
             if worker is None:
@@ -80,6 +81,7 @@ async def snapshot(
 ) -> Response:
     """Latest annotated frame; ``?raw=true`` returns the unannotated frame (line editor)."""
     await _require_camera(session, camera_id)
+    await session.close()
     worker = container.cameras.live(camera_id)
     if worker is None:
         raise UnavailableError("Camera is disabled")

@@ -1,9 +1,9 @@
 import asyncio
 from collections.abc import AsyncIterator
-from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Query, Request
+from pydantic import AwareDatetime
 from sse_starlette import EventSourceResponse, ServerSentEvent
 
 from yardlens_api.api.deps import ContainerDep, SessionDep
@@ -23,8 +23,8 @@ async def get_events(
     camera_id: int | None = None,
     type: Annotated[list[EventType] | None, Query()] = None,  # noqa: A002 - public query name
     class_name: str | None = None,
-    since: datetime | None = None,
-    until: datetime | None = None,
+    since: AwareDatetime | None = None,
+    until: AwareDatetime | None = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=200)] = 25,
 ) -> EventPage:

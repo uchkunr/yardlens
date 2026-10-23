@@ -235,7 +235,13 @@ class RemoteNode:
                 await handle(message, files)
                 if writer.done():
                     return  # closed from this side (replaced, removed, shutting down)
-        except WebSocketDisconnect, RuntimeError:
+        except WebSocketDisconnect:
+            return
+        except RuntimeError as exc:
+            # Starlette raises this for a receive after the socket closed; anything
+            # else is a bug in handling a message, not a dropped connection.
+            if "disconnect" not in str(exc).lower():
+                logger.exception("Worker channel failed", extra={"worker_id": self.worker_id})
             return
         finally:
             ticker.cancel()

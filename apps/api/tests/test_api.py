@@ -364,3 +364,11 @@ async def test_a_camera_can_have_detection_settings_of_its_own(client: httpx.Asy
     classes = await client.get("/api/settings/models/yolo26n.pt/classes")
     assert classes.status_code == 200
     assert "truck" in classes.json()
+
+
+async def test_time_filters_must_carry_a_time_zone(client: httpx.AsyncClient) -> None:
+    """A naive timestamp cannot be compared with the stored (UTC) times; it is refused up front
+    instead of failing inside the database layer."""
+    for path in ("/api/events", "/api/loading/sessions", "/api/loading/sessions/export"):
+        response = await client.get(path, params={"since": "2026-01-01T00:00:00"})
+        assert response.status_code == 422, path

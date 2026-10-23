@@ -25,7 +25,7 @@ def parse_token(token: str) -> tuple[int, str] | None:
     """``ylw_<id>_<secret>`` into the worker id and the secret."""
     prefix, _, rest = token.partition("_")
     worker_id, _, secret = rest.partition("_")
-    if prefix != TOKEN_PREFIX or not worker_id.isdigit() or not secret:
+    if prefix != TOKEN_PREFIX or not (worker_id.isascii() and worker_id.isdigit()) or not secret:
         return None
     return int(worker_id), secret
 

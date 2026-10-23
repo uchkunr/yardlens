@@ -277,14 +277,14 @@ def _grab_preview(container: Container, payload: CameraTestRequest) -> CameraTes
         return CameraTestResult(
             success=False,
             message="Connected, but no frame was received",
-            resolved_url=source.uri,
+            resolved_url=mask_url(source.uri),
             elapsed_ms=0,
         )
     preview = base64.b64encode(encode_jpeg(frame, quality=75, max_width=960)).decode("ascii")
     return CameraTestResult(
         success=True,
         message="Connection successful",
-        resolved_url=source.uri,
+        resolved_url=mask_url(source.uri),
         width=int(frame.shape[1]),
         height=int(frame.shape[0]),
         elapsed_ms=0,

@@ -302,8 +302,8 @@ async def connect(websocket: WebSocket) -> None:
         worker_id=worker.id, name=worker.name, websocket=websocket, hello=hello, address=address
     )
     cluster = container.cameras
-    await cluster.attach(node)
     try:
+        await cluster.attach(node)
         await node.run(lambda message, files: cluster.handle(node, message, files))
     finally:
         await cluster.detach(node)

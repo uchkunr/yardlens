@@ -143,7 +143,10 @@ function StatusCard() {
             </Row>
             <Row label={s.python}>{health.data.python_version}</Row>
             <Row label={s.apiUrl}>
-              <span className="font-mono text-xs">{API_URL}</span>
+              {/* Empty behind Caddy, where the API shares the dashboard's origin. */}
+              <span className="font-mono text-xs">
+                {API_URL || (typeof window === "undefined" ? "" : window.location.origin)}
+              </span>
             </Row>
           </dl>
         )}

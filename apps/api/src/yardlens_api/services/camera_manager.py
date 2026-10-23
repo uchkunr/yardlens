@@ -50,7 +50,6 @@ class CameraManager:
         limits: Callable[[], Limits] | None = None,
         detector_for: Callable[[str], Detector] | None = None,
         names: dict[int, str] | None = None,
-        workers_enabled: bool = True,
     ) -> None:
         self._detector = detector
         self._detection_settings = detection_settings
@@ -62,7 +61,6 @@ class CameraManager:
         self._plate_reader = plate_reader
         self._limits = limits
         self._detector_for = detector_for
-        self._workers_enabled = workers_enabled
         self._workers: dict[int, CameraWorker] = {}
         self._names = names if names is not None else {}
         self._retiring: set[CameraWorker] = set()
@@ -91,7 +89,7 @@ class CameraManager:
         a loading session cut off by a restart, for a newly started worker to carry on."""
         self._names[config.id] = config.name
         current = self._workers.get(config.id)
-        if not enabled or not self._workers_enabled:
+        if not enabled:
             if current is not None:
                 self._retire(config.id)
                 self._on_status(config.id, CameraStatus.DISABLED, None)

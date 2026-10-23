@@ -39,7 +39,6 @@ SAMPLE_INTERVAL_SECONDS = 2.0
 HISTORY_SAMPLES = 90  # three minutes
 # Below this much free space snapshots are no longer written, so the database keeps room to work.
 DISK_RESERVE_BYTES = 2 * 1024**3
-DISK_WARNING_PERCENT = 90.0
 
 
 @dataclass(frozen=True, slots=True)

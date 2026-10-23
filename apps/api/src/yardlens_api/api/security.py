@@ -28,7 +28,6 @@ REFRESH_PATH = "/api/auth"
 CSRF_HEADER = "x-yardlens-request"
 _UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 # Workers authenticate with their own token and never use cookies.
-_CSRF_EXEMPT_PREFIXES = ("/api/workers/connect",)
 
 
 def _auth(connection: HTTPConnection) -> AuthService:
@@ -131,7 +130,7 @@ class CsrfMiddleware:
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] == "http" and scope["method"] in _UNSAFE_METHODS:
             path: str = scope["path"]
-            if path.startswith("/api/") and not path.startswith(_CSRF_EXEMPT_PREFIXES):
+            if path.startswith("/api/"):
                 headers = Headers(scope=scope)
                 origin = headers.get("origin")
                 if headers.get(CSRF_HEADER) != "1" or (

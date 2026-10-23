@@ -356,7 +356,7 @@ def build_workbook(
                 item.unloaded,
             ]
         )
-        sheet.cell(row=sheet.max_row, column=2).number_format = "DD.MM.YYYY"
+        sheet.cell(row=number + 1, column=2).number_format = "DD.MM.YYYY"
 
     sheet.append(
         [
@@ -373,7 +373,7 @@ def build_workbook(
             sum(item.unloaded for item in sessions),
         ]
     )
-    for cell in sheet[sheet.max_row]:
+    for cell in sheet[len(sessions) + 2]:
         cell.font = Font(bold=True)
 
     buffer = io.BytesIO()

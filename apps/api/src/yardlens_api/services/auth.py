@@ -92,7 +92,7 @@ class LoginThrottle:
         count, last = self._failures.get(address, (0, 0.0))
         if count < self.FREE_FAILURES:
             return 0.0
-        delay = min(self.MAX_WAIT, 2.0 ** (count - self.FREE_FAILURES))
+        delay = min(self.MAX_WAIT, 2.0 ** min(count - self.FREE_FAILURES, 16))
         return max(0.0, last + delay - self._clock())
 
     def global_delay(self) -> float:
@@ -106,6 +106,9 @@ class LoginThrottle:
         count, last = self._failures.get(address, (0, 0.0))
         if now - last > 3600:
             count = 0
+        if len(self._failures) >= 10_000:
+            # Addresses that gave up an hour ago are forgotten, so the table cannot grow forever.
+            self._failures = {a: v for a, v in self._failures.items() if now - v[1] <= 3600}
         self._failures[address] = (count + 1, now)
         self._recent.append(now)
         return count + 1
@@ -142,6 +145,8 @@ class AuthService:
         self.refresh_ttl = refresh_ttl
         self._alert = alert
         self.throttle = LoginThrottle()
+        self._login_locks: dict[str, asyncio.Lock] = {}
+        self._login_waiting: dict[str, int] = {}
         # Verified against when the username is unknown, so both paths take the same time.
         self._dummy_hash = hasher.hash(new_token())
         self._revoked: dict[str, datetime] = {}
@@ -200,6 +205,22 @@ class AuthService:
     # -- sign-in and refresh -------------------------------------------------------------------
 
     async def login(
+        self, username: str, password: str, *, address: str, user_agent: str | None
+    ) -> Issued:
+        """Attempts from one address run one at a time, so a burst of parallel guesses meets
+        the throttle instead of slipping past it while the first attempt is still checked."""
+        lock = self._login_locks.setdefault(address, asyncio.Lock())
+        self._login_waiting[address] = self._login_waiting.get(address, 0) + 1
+        try:
+            async with lock:
+                return await self._login(username, password, address=address, user_agent=user_agent)
+        finally:
+            self._login_waiting[address] -= 1
+            if self._login_waiting[address] == 0:
+                del self._login_waiting[address]
+                del self._login_locks[address]
+
+    async def _login(
         self, username: str, password: str, *, address: str, user_agent: str | None
     ) -> Issued:
         wait = self.throttle.wait(address)

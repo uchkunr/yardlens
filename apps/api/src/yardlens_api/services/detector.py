@@ -19,6 +19,7 @@ import threading
 import time
 import warnings
 from collections.abc import Callable, Sequence
+from concurrent.futures import Future
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -115,10 +116,6 @@ class InferencePlan:
     backend: Backend
     device: str
     """A torch device for PyTorch; ``intel:cpu`` or ``intel:gpu`` for OpenVINO."""
-
-    @property
-    def on_gpu(self) -> bool:
-        return self.device.startswith(("cuda", "mps", "intel:gpu"))
 
 
 def plan_inference(
@@ -434,17 +431,29 @@ class ModelPool:
 
     def __init__(self, factory: Callable[[str], Detector]) -> None:
         self._factory = factory
-        self._detectors: dict[str, Detector] = {}
+        # One future per model, loading or loaded. Callers wait on the future rather than on the
+        # lock, so the event loop can read the pool while a camera thread loads a model.
+        self._detectors: dict[str, Future[Detector]] = {}
         self._lock = threading.Lock()
 
     def get(self, model_name: str) -> Detector:
         """The detector for ``model_name``, loading it first if needed (blocking)."""
         with self._lock:
-            detector = self._detectors.get(model_name)
-            if detector is None:
+            future = self._detectors.get(model_name)
+            loader = future is None
+            if future is None:
+                future = self._detectors[model_name] = Future[Detector]()
+        if loader:
+            try:
                 detector = self._factory(model_name)
-                self._detectors[model_name] = detector
-            return detector
+            except BaseException as exc:
+                with self._lock:
+                    if self._detectors.get(model_name) is future:
+                        del self._detectors[model_name]
+                future.set_exception(exc)
+                raise
+            future.set_result(detector)
+        return future.result()
 
     def retain(self, model_names: set[str]) -> None:
         with self._lock:
@@ -460,4 +469,5 @@ class ModelPool:
     @property
     def busy_seconds(self) -> float:
         with self._lock:
-            return sum(detector.busy_seconds for detector in self._detectors.values())
+            loaded = [f for f in self._detectors.values() if f.done() and f.exception() is None]
+        return sum(f.result().busy_seconds for f in loaded)

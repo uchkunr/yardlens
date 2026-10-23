@@ -59,7 +59,11 @@ from yardlens_api.services.camera_manager import CameraManager
 from yardlens_api.services.camera_worker import CameraConfig, CameraWorker, RuntimeState
 from yardlens_api.services.event_recorder import EventRecorder
 from yardlens_api.services.loading import SessionState
-from yardlens_api.services.loading_store import InterruptedSession, resumable_session
+from yardlens_api.services.loading_store import (
+    RESUME_WINDOW,
+    InterruptedSession,
+    resumable_session,
+)
 from yardlens_api.services.remote import RemoteNode
 from yardlens_api.services.settings_store import SettingsStore
 
@@ -631,7 +635,9 @@ class Cluster:
         session in the database (it ran on a worker)."""
         resume = self._resume.pop(camera_id, None)
         if resume is not None:
-            return resume
+            if datetime.now(UTC) - resume.last_seen <= RESUME_WINDOW:
+                return resume
+            logger.info("Dropped a stale session to resume", extra={"camera_id": camera_id})
         try:
             async with self._session_factory() as session:
                 return await resumable_session(session, camera_id)
@@ -649,7 +655,11 @@ class Cluster:
             if camera is None:
                 continue
             assignment = Assignment(config=camera.config, epoch=self._placements[camera_id].epoch)
-            if camera_id not in node.running:
+            if camera_id in node.running:
+                # The worker kept the session going itself; a copy from before the
+                # restart is older than what it has.
+                self._resume.pop(camera_id, None)
+            else:
                 resume = await self._take_resume(camera_id)
                 if resume is not None:
                     # In the worker's clock, which it sends back corrected.

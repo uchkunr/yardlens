@@ -1,7 +1,9 @@
+import asyncio
 from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Query, Response
+from pydantic import AwareDatetime
 
 from yardlens_api.api.deps import ContainerDep, SessionDep
 from yardlens_api.api.params import check_range, parse_timezone
@@ -46,8 +48,8 @@ async def get_loading_sessions(
     session: SessionDep,
     camera_id: int | None = None,
     plate: str | None = None,
-    since: datetime | None = None,
-    until: datetime | None = None,
+    since: AwareDatetime | None = None,
+    until: AwareDatetime | None = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=200)] = 25,
 ) -> LoadingSessionPage:
@@ -66,8 +68,8 @@ async def export_loading_sessions(
     session: SessionDep,
     camera_id: int | None = None,
     plate: str | None = None,
-    since: datetime | None = None,
-    until: datetime | None = None,
+    since: AwareDatetime | None = None,
+    until: AwareDatetime | None = None,
     tz: str = "UTC",
     lang: Language = "ru",
 ) -> Response:
@@ -76,7 +78,8 @@ async def export_loading_sessions(
     zone = parse_timezone(tz)
     filters = SessionFilters(camera_id=camera_id, plate=plate, since=since, until=until)
     rows = await all_sessions(session, filters, limit=_EXPORT_LIMIT)
-    content = build_workbook(rows, tz=zone, language=lang)
+    # openpyxl is synchronous; a large history would otherwise stall every other request.
+    content = await asyncio.to_thread(build_workbook, rows, tz=zone, language=lang)
     day = datetime.now(UTC).astimezone(zone).strftime("%Y-%m-%d")
     return Response(
         content=content,

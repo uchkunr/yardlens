@@ -75,6 +75,8 @@ BACKOFF_INITIAL_SECONDS = 1.0
 BACKOFF_MAX_SECONDS = 60.0
 STALL_TIMEOUT_SECONDS = 20.0
 _MAX_CONSECUTIVE_EMPTY_READS = 5
+# grab() succeeding while retrieve() keeps failing: a decoder that stopped working.
+_MAX_CONSECUTIVE_FAILED_RETRIEVES = 25
 
 
 @dataclass(frozen=True, slots=True)
@@ -367,7 +369,7 @@ class CameraWorker:
                 self._plate_stream = self._new_plate_stream(config)
         self.config = config
         if retired is not None:
-            retired.stop()
+            retired.stop(join=False)  # on the event loop: never wait for its thread
         if closed is not None and tracker is not None:
             self._report_session(closed, tracker)
 
@@ -516,6 +518,7 @@ class CameraWorker:
         """Read until the stream ends or stalls. Returns whether any frame was received."""
         received = False
         empty_reads = 0
+        failed_retrieves = 0
         self._last_grab = None
         while not self._stop.is_set():
             grabbed = reader.grab()
@@ -524,7 +527,18 @@ class CameraWorker:
                 if self._last_grab is not None and 0 < now - self._last_grab < 1.0:
                     self._frame_interval += 0.1 * (now - self._last_grab - self._frame_interval)
                 self._last_grab = now
-            frame = reader.retrieve() if grabbed and self._frame_wanted(now) else None
+            wanted = grabbed and self._frame_wanted(now)
+            frame = reader.retrieve() if wanted else None
+            if wanted and frame is None:
+                failed_retrieves += 1
+                if failed_retrieves >= _MAX_CONSECUTIVE_FAILED_RETRIEVES:
+                    logger.warning(
+                        "Frames arrive but cannot be decoded; reconnecting",
+                        extra={"camera_id": self.config.id},
+                    )
+                    return received
+            elif frame is not None:
+                failed_retrieves = 0
             if not grabbed or (frame is None and self._latest_frame is None):
                 empty_reads += 1
                 stalled = received and now - self._last_frame_monotonic > STALL_TIMEOUT_SECONDS

@@ -81,10 +81,10 @@ class PlateStream:
                 return None
             return self._frame
 
-    def stop(self) -> None:
+    def stop(self, *, join: bool = True) -> None:
         self._stop.set()
         thread = self._thread
-        if thread is not None and thread.is_alive():
+        if join and thread is not None and thread.is_alive():
             thread.join(timeout=5.0)
 
     def _wanted(self) -> bool:

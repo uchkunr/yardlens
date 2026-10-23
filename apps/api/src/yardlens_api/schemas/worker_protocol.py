@@ -15,10 +15,9 @@ back to back.
 import json
 import struct
 from collections.abc import Sequence
-from datetime import datetime
 from typing import Annotated, Literal, cast
 
-from pydantic import BaseModel, Field, TypeAdapter, ValidationError
+from pydantic import AwareDatetime, BaseModel, Field, TypeAdapter, ValidationError
 
 from yardlens_api.core.enums import CameraStatus
 from yardlens_api.schemas.settings import DetectionSettings, PerformanceSettings
@@ -55,7 +54,7 @@ class Hello(BaseModel):
         default_factory=dict[int, int],
         description="Cameras the worker already runs (after the server restarted), with epochs",
     )
-    time: datetime = Field(description="The worker's clock")
+    time: AwareDatetime = Field(description="The worker's clock")
 
 
 class CameraReport(BaseModel):
@@ -124,7 +123,7 @@ class RawFrame(BaseModel):
 class Pong(BaseModel):
     type: Literal["pong"] = "pong"
     id: int
-    time: datetime = Field(description="The worker's clock when it answered")
+    time: AwareDatetime = Field(description="The worker's clock when it answered")
 
 
 type WorkerMessage = Annotated[
@@ -154,7 +153,7 @@ class Assignment(BaseModel):
     resume: SessionState | None = Field(
         default=None, description="An open loading session to carry on (in the worker's clock)"
     )
-    resume_seen: datetime | None = None
+    resume_seen: AwareDatetime | None = None
 
 
 class Assign(BaseModel):

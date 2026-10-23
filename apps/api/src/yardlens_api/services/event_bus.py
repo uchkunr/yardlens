@@ -23,10 +23,6 @@ class EventBus:
         self._subscribers: set[asyncio.Queue[BusMessage]] = set()
         self._queue_size = subscriber_queue_size
 
-    @property
-    def subscriber_count(self) -> int:
-        return len(self._subscribers)
-
     def publish(self, message: BusMessage) -> None:
         """Deliver to every subscriber; slow subscribers drop their oldest message."""
         for queue in tuple(self._subscribers):
