@@ -87,8 +87,9 @@ Zero-shot detection is not good enough to count; a trained detector is required.
   OpenCV build (it falls back to the CPU); the systemd units in `deploy/linux` are untested;
   OpenVINO on AMD CPUs is untested. CI runs the test suite on Linux, not on real cameras.
 - **24-hour run** with real cameras, watching memory and CPU under **Settings → Нагрузка**.
-- **No authentication**, and camera URLs with their passwords are visible in the dashboard. See
-  [roadmap.md](roadmap.md) with the other architecture work not done yet.
+- **One administrator only.** Sign-in, HTTPS and masked camera passwords are done; operators who
+  may only watch would need users with roles. See [roadmap.md](roadmap.md) for the other
+  architecture work not done yet.
 
 ## Demo clips (not in git)
 
