@@ -17,6 +17,7 @@ dependencies = [
     "fastapi>=0.143.0",
     "httpx>=0.28.1",
     # GPU load for the resource monitor (NVIDIA only; nothing happens without the driver).
+    "numpy>=2.5.4",
     "nvidia-ml-py>=13.615.71",
     # Excel export of loading sessions.
     "openpyxl>=3.1.5",
@@ -31,6 +32,7 @@ dependencies = [
     "pyjwt>=2.15.1",
     "sqlalchemy[asyncio]>=2.1.4",
     "sse-starlette>=3.5.0",
+    "starlette>=1.9.0",
     "supervision>=0.30.9",
     # Listed directly (Ultralytics needs them anyway) so Windows can take the CUDA builds below.
     "torch>=2.14.1",
