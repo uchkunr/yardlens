@@ -118,3 +118,16 @@ async def test_cargo_classes_must_be_detected(client: httpx.AsyncClient) -> None
     )
     assert good.status_code == 200
     assert good.json()["detection"]["cargo_classes"] == ["suitcase"]
+
+
+@pytest.mark.usefixtures("video_file")
+async def test_a_camera_without_a_zone_is_not_a_loading_bay(client: httpx.AsyncClient) -> None:
+    """A missing zone must be SQL NULL, not the JSON value null: the overview switches to the
+    loading layout as soon as one camera counts as a bay."""
+    response = await client.post(
+        "/api/cameras",
+        json={"name": "Gate", "source_type": "file", "url": "videos/clip.mp4", "enabled": False},
+    )
+    assert response.status_code == 201, response.text
+    summary = (await client.get("/api/loading/summary")).json()
+    assert summary["loading_cameras"] == 0

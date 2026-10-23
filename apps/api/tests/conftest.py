@@ -1,15 +1,11 @@
-import asyncio
-import contextlib
-from collections.abc import AsyncGenerator, AsyncIterator, Callable, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from pathlib import Path
-from typing import Any
 
 import cv2
 import httpx
 import numpy as np
 import pytest
 import supervision as sv
-import uvicorn
 from fastapi import FastAPI
 from numpy.typing import NDArray
 
@@ -106,7 +102,6 @@ def settings(tmp_path: Path) -> Settings:
         environment="test",
         data_dir=tmp_path / "data",
         database_url=f"sqlite+aiosqlite:///{tmp_path / 'test.db'}",
-        workers_enabled=True,
         cors_origins=[ORIGIN],
         public_url=ORIGIN,
         admin_username=ADMIN_USERNAME,
@@ -167,27 +162,3 @@ async def anon_client(app: FastAPI) -> AsyncIterator[httpx.AsyncClient]:
     """Not signed in."""
     async with browser(app) as http:
         yield http
-
-
-@contextlib.asynccontextmanager
-async def serve(app: Any) -> AsyncGenerator[str]:
-    """Serve an ASGI app on a free local port (its lifespan is the caller's); yields its URL."""
-    instance = uvicorn.Server(
-        uvicorn.Config(app, host="127.0.0.1", port=0, lifespan="off", log_config=None)
-    )
-    task = asyncio.create_task(instance.serve())
-    for _ in range(500):
-        if instance.started:
-            break
-        await asyncio.sleep(0.01)
-    port: int = instance.servers[0].sockets[0].getsockname()[1]
-    yield f"http://127.0.0.1:{port}"
-    instance.should_exit = True
-    await task
-
-
-@pytest.fixture
-async def live_server(app: FastAPI) -> AsyncIterator[str]:
-    """The app over a real socket (WebSockets, workers); yields its http:// address."""
-    async with serve(app) as url:
-        yield url

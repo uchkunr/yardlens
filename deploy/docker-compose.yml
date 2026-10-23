@@ -1,12 +1,10 @@
-# The YardLens server: database, API (which also processes cameras), dashboard and HTTPS.
+# The YardLens server: database, API (which also processes the cameras), dashboard and HTTPS.
 #
 #   cd deploy
 #   cp .env.example .env     # then fill it in
 #   docker compose up -d
 #
 # Open https://<PUBLIC_HOST>. Only Caddy is reachable from the network (ports 80 and 443).
-# With an NVIDIA GPU: YARDLENS_VARIANT=cuda in .env, and
-#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
 name: yardlens
 
 services:
@@ -27,15 +25,11 @@ services:
     shm_size: 256mb
 
   api:
-    image: ${YARDLENS_IMAGE:-ghcr.io/uchkunr/yardlens}:${YARDLENS_VERSION:-0.1.0}-${YARDLENS_VARIANT:-cpu}
+    image: ${YARDLENS_IMAGE:-ghcr.io/uchkunr/yardlens}:${YARDLENS_VERSION:-0.1.0}
     build:
       context: ..
       dockerfile: apps/api/Dockerfile
-      args:
-        VARIANT: ${YARDLENS_VARIANT:-cpu}
     restart: unless-stopped
-    # The schema is applied on every start (it is idempotent), then the API runs.
-    command: ["sh", "-c", "db-setup && exec yardlens-api"]
     environment:
       YARDLENS_DATABASE_URL: postgresql+asyncpg://yardlens:${POSTGRES_PASSWORD}@postgres:5432/yardlens
       YARDLENS_PUBLIC_URL: https://${PUBLIC_HOST:?Set PUBLIC_HOST in .env}
@@ -44,7 +38,7 @@ services:
       YARDLENS_FORWARDED_ALLOW_IPS: "*"
       YARDLENS_ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       YARDLENS_ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env}
-      # Workers pin this certificate authority; the dashboard offers it for download.
+      # The dashboard offers this certificate authority for download (Settings > System).
       YARDLENS_CA_CERT_PATH: /caddy/caddy/pki/authorities/local/root.crt
       TZ: ${TZ:-UTC}
     volumes:

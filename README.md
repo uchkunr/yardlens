@@ -1,9 +1,9 @@
 # YardLens
 
-Self-hosted video analytics for yards, gates and loading bays. Point it at a camera and it detects
-and tracks vehicles and people with YOLO, counts what crosses a line you draw, and shows annotated
-live video and events in a web dashboard. At a loading bay it records every vehicle: its plate, when
-it came and left, and how much was loaded.
+Open-source camera counting for yards, gates and loading bays. Point it at a camera and it counts
+what crosses a line you draw: vehicles at a gate, or sacks going onto each truck at a loading bay,
+where it also reads the plate and records when the vehicle came and left. Self-hosted, one server,
+runs on a CPU.
 
 ![YardLens: live annotated cameras, line counting and real-time events](docs/yardlens-demo.gif)
 
@@ -15,18 +15,34 @@ Pyright (strict).
 
 ## What it does
 
-- **Any camera.** RTSP, HLS, MJPEG or JPEG snapshot URLs, YouTube live streams, local video files.
-- **Detection and counting.** Tracked YOLO detections; a counting line per camera gives in and out
-  counts, and every crossing becomes an event with a snapshot.
-- **Live dashboard.** Annotated feeds, today's statistics, an event log with filters and Telegram
-  notifications. Russian by default, English as the second language, light and dark.
-- **Loading bays.** A camera over a bay keeps a record per vehicle: its plate (read with
-  [fast-alpr](https://github.com/ankandrew/fast-alpr)), arrival, departure and the sacks counted
-  onto it, with history and an Excel export.
-- **Runs on what you have.** An NVIDIA GPU, Apple silicon or the CPU through OpenVINO. A governor
-  keeps the server under a CPU limit, and other machines can join as workers.
-- **Ready for a server.** Sign-in, HTTPS, Docker images, retries through database outages, CI on
+- **Counts line crossings** on any RTSP, HLS, MJPEG or file camera: draw the line, get in and out
+  counts, an event with a snapshot for every crossing, and a 24-hour chart.
+- **Keeps a record per vehicle at a loading bay:** its plate (read with
+  [fast-alpr](https://github.com/ankandrew/fast-alpr)), arrival, departure and the cargo counted
+  onto it, with history, plate search and an Excel export.
+- **Shows it live:** annotated feeds, today's numbers and an event log, in English or Russian,
+  light or dark, with Telegram notifications.
+- **Runs on what you have:** the CPU through OpenVINO, an NVIDIA GPU or Apple silicon. A governor
+  keeps the server under a CPU limit by lowering frame rates instead of falling over.
+- **Is ready for a server:** sign-in, HTTPS, Docker images, retries through database outages, CI on
   Linux and Windows.
+
+## Adapting it to your yard
+
+Everything specific to one site is a setting or a small file, so the same code fits a gate, a
+warehouse or a construction site:
+
+- **What to count.** The stock YOLO model knows vehicles and people. For sacks, boxes, pallets or
+  anything else, train a model on footage from your own camera and pick it per camera; the
+  procedure, with what was already tried, is in [docs/sack-model.md](docs/sack-model.md).
+- **Where to count.** The counting line and the loading zone are drawn on the camera's frame in
+  the dashboard and stored in normalized coordinates, so they survive a resolution change.
+- **Your plates.** Plates are normalized and formatted the Uzbek way (`01 A 123 BC`); another
+  format is one regular expression in `apps/api/src/yardlens_api/services/plates.py` and
+  `apps/web/src/lib/format.ts`.
+- **Your language.** The dashboard copy lives in `apps/web/src/i18n/messages`, one typed file per
+  language; add one by copying `en.ts`. Telegram messages are in `core/i18n.py`.
+- **Your notifications.** Telegram is built in; another channel is one class in `notifier.py`.
 
 ## Quick start
 
@@ -45,8 +61,9 @@ bun run dev                                    # API on :8100, dashboard on :310
 ```
 
 Open <http://localhost:3100> and sign in. The first start downloads the YOLO weights (a few MB);
-after that the sample camera shows annotated detections within seconds. OpenAPI docs are at
-<http://localhost:8100/docs>.
+after that the two sample cameras show annotated detections within seconds: a highway clip that
+counts vehicles crossing its line, and a loading bay with its zone and line drawn, which counts
+cargo once a model trained on it is in place. OpenAPI docs are at <http://localhost:8100/docs>.
 
 `bun run setup` is safe to re-run after a dependency or schema change: every step is idempotent, and
 demo cameras are seeded only once per database. It creates the database when it's missing, which
@@ -64,18 +81,12 @@ the URL before saving.
 | RTSP | `rtsp://user:pass@192.168.1.20:554/stream1` |
 | HTTP | An MJPEG stream (`multipart/x-mixed-replace`) or a JPEG snapshot URL, which gets polled |
 | HLS | An `.m3u8` playlist |
-| YouTube | A live stream URL, resolved to HLS with yt-dlp |
 | File | A path relative to `apps/api/data` (or absolute), played in a loop |
 
 To count, open the camera's menu, **Counting line**, click two points on the frame and save.
 Crossing in the direction of the green arrow counts as *in*, the other way as *out*. Inference FPS
 is set per camera; model, confidence and classes are set once under **Settings → Detection**, and a
 camera can have settings of its own (a model trained for its scene) from the same menu.
-
-`bun run setup` seeds a looped highway clip with a counting line already drawn, plus three New York
-State DOT traffic cameras published through 511NY (third-party feeds; availability is up to their
-owners). To re-add missing demo cameras to a database that isn't empty, run `uv run seed --force`
-in `apps/api`.
 
 ## Loading bays
 
@@ -88,19 +99,18 @@ session closes after 60 s with neither vehicle nor cargo in sight. Sessions surv
 restart and are kept for good; **Loadings** has the history, plate search, totals and an Excel
 export, and Telegram can report *vehicle arrived* and *loading completed*.
 
-**Sacks need a model of their own.** COCO has no sack class, and zero-shot detectors did not find
-sacks on a moving conveyor. Record footage from the bay, label a few hundred frames with two classes
-(`truck` and `sack`), train a YOLO model on it and check its count against loadings counted by hand
-with `uv run yardlens-eval`. The procedure, what was already tried and what is still open are in
-[docs/sack-model.md](docs/sack-model.md).
+COCO has no sack class, and zero-shot detectors did not find sacks on a moving conveyor, so a bay
+needs a model trained on a few hundred labelled frames from its own camera. The procedure is in
+[docs/sack-model.md](docs/sack-model.md); `uv run yardlens-eval` checks a model's count against a
+recording counted by hand.
 
 ## Running on a server
 
-The simplest is Docker: the server, HTTPS and the database in one Compose file, and any number of
-worker computers that take cameras off the server with one `docker run` command each. See
+The simplest is Docker: the server, HTTPS and the database in one Compose file; see
 [docs/deployment.md](docs/deployment.md). Without Docker, `bun run build` then `bun run start`
 runs both apps in production mode; systemd units and a Windows scheduled-task script are in
-[`deploy/`](deploy).
+[`deploy/`](deploy). One server runs every camera: a six-core CPU handles a handful of cameras,
+a GPU many more.
 
 ## Development
 
@@ -122,22 +132,18 @@ commands with `UV_NO_SYNC=1`.
 - [Architecture](docs/architecture.md): the pipeline, the design decisions behind it, performance
   and the load governor, project layout.
 - [Configuration and API](docs/configuration.md): every environment variable and endpoint.
-- [Deployment](docs/deployment.md): Docker, HTTPS, workers on other machines, security, backups.
+- [Deployment](docs/deployment.md): Docker, HTTPS, security, backups.
 - [Sack model](docs/sack-model.md): training the detector a loading bay needs.
 - [Roadmap](docs/roadmap.md): the architecture work not done yet.
 
 ## Limitations
 
 - **One administrator.** There are no other users or roles yet.
-- **Throughput is bounded by one model** per process. Past what `bun run bench` reports for your
-  machine, add a GPU or workers.
+- **One server.** Inference is in-process and serialized behind one model; past what
+  `bun run bench` reports for your machine, you want a GPU.
 - **Every frame is still decoded.** Give cameras their sub-stream (720p–1080p) where they have one.
-- **`object_entered` can over-count** in crowded or fast scenes at low inference rates; line
-  crossings are the more reliable number.
-- **Camera tests run on the server**, so testing a camera pinned to a worker on another network
-  fails from the form while the worker itself still reaches it.
-- **YouTube is fragile.** YouTube rate-limits IPs, and yt-dlp needs a JavaScript runtime (Deno,
-  Node or Bun) to resolve URLs.
+- **Extrapolation can drift.** Between inferences the live view moves boxes along their last
+  velocity; an object that brakes hard may wander until the next inference. Counts are unaffected.
 
 ## License
 

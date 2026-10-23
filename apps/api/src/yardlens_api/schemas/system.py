@@ -63,8 +63,6 @@ class CameraLoad(BaseModel):
     measured_fps: float
     max_fps: float
     hardware_decoding: bool
-    worker_id: int | None = Field(default=None, description="The worker it runs on; None: here")
-    worker_name: str | None = None
 
 
 class ResourcePoint(BaseModel):

@@ -1,10 +1,12 @@
+import asyncio
 import time
 from datetime import UTC, datetime, timedelta
 
 import psutil
-from fastapi import APIRouter
+from fastapi import APIRouter, Response
 
 from yardlens_api.api.deps import ContainerDep
+from yardlens_api.core.errors import NotFoundError
 from yardlens_api.schemas.system import (
     CameraLoad,
     CpuInfo,
@@ -75,21 +77,17 @@ async def resources(container: ContainerDep) -> SystemResources:
     limits = monitor.limits()
     performance = container.settings_store.performance()
     cameras: list[CameraLoad] = []
-    for running in container.cameras.running():
-        state = running.state
+    for worker in container.cameras.workers():
+        state = worker.state()
         cameras.append(
             CameraLoad(
-                id=running.config.id,
-                name=running.config.name,
+                id=worker.config.id,
+                name=worker.config.name,
                 activity=state.activity,
                 target_fps=state.target_fps,
                 measured_fps=state.measured_fps,
-                max_fps=running.config.inference_fps,
+                max_fps=worker.config.inference_fps,
                 hardware_decoding=state.hardware_decoding,
-                worker_id=running.worker_id,
-                worker_name=container.cameras.worker_name(running.worker_id)
-                if running.worker_id is not None
-                else None,
             )
         )
     return SystemResources(
@@ -133,4 +131,22 @@ async def resources(container: ContainerDep) -> SystemResources:
             )
             for point in monitor.history()
         ],
+    )
+
+
+@router.get(
+    "/ca.pem",
+    response_class=Response,
+    responses={200: {"content": {"application/x-pem-file": {}}}},
+)
+async def certificate_authority(container: ContainerDep) -> Response:
+    """The certificate authority behind this server's HTTPS, for people to install so their
+    browsers trust the dashboard on the local network."""
+    path = container.settings.ca_cert_path
+    if path is None or not path.is_file():
+        raise NotFoundError("This server has no certificate authority of its own")
+    return Response(
+        content=await asyncio.to_thread(path.read_bytes),
+        media_type="application/x-pem-file",
+        headers={"Content-Disposition": 'attachment; filename="yardlens-ca.pem"'},
     )

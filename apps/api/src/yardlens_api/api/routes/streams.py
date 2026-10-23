@@ -46,7 +46,7 @@ async def stream_mjpeg(
         while not await request.is_disconnected():
             if container.auth.is_revoked(user.family_id) or datetime.now(UTC) >= user.expires_at:
                 return
-            worker = container.cameras.live(camera_id)
+            worker = container.cameras.worker(camera_id)
             if worker is None:
                 await asyncio.sleep(1.0)
                 continue
@@ -82,11 +82,11 @@ async def snapshot(
     """Latest annotated frame; ``?raw=true`` returns the unannotated frame (line editor)."""
     await _require_camera(session, camera_id)
     await session.close()
-    worker = container.cameras.live(camera_id)
+    worker = container.cameras.worker(camera_id)
     if worker is None:
         raise UnavailableError("Camera is disabled")
     if raw:
-        jpeg = await worker.raw_jpeg()
+        jpeg = await asyncio.to_thread(worker.latest_raw_jpeg)
     else:
         _, jpeg = worker.latest_jpeg()
         # Rendering pauses while nobody watches; the request above restarts it, so an online

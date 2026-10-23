@@ -87,12 +87,6 @@ class PerformanceSettings(BaseModel):
     )
 
 
-class ClusterSettings(BaseModel):
-    local_processing: bool = Field(
-        default=True, description="This server processes cameras as well as the workers"
-    )
-
-
 class TelegramSettings(BaseModel):
     """Stored form, including the secret bot token. Never returned by the API."""
 

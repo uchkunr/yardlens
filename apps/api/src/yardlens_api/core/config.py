@@ -54,14 +54,9 @@ class Settings(BaseSettings):
     hardware_decode: bool = True
     # Run below normal priority so the OS, database and web app stay responsive under load.
     low_priority: bool = True
-    # False: this server never processes cameras itself, whatever the dashboard says.
-    workers_enabled: bool = True
 
-    # Workers: the image the dashboard's start command uses, the address workers reach this
-    # server at (defaults to public_url), and the certificate authority behind its HTTPS, whose
-    # fingerprint workers pin (Caddy's internal CA in Docker).
-    worker_image: str = "ghcr.io/uchkunr/yardlens"
-    worker_server_url: str | None = None
+    # The certificate authority behind this server's HTTPS (Caddy's internal CA in Docker),
+    # offered for download so browsers on the local network trust the dashboard.
     ca_cert_path: Path | None = None
 
     stream_jpeg_quality: int = Field(default=80, ge=30, le=95)

@@ -1,8 +1,8 @@
 # HTTPS in front of YardLens on the local network.
 #
 # Caddy issues the certificates from its own certificate authority (`tls internal`). Install that
-# CA once on each device that opens the dashboard (Settings > System > Download certificate);
-# workers trust it through the fingerprint in their command. With a real domain later, delete
+# CA once on each device that opens the dashboard (Settings > System > Download certificate).
+# With a real domain later, delete
 # `tls internal` and Caddy gets a public certificate by itself.
 {
 	# Clients connecting by IP address send no server name; this is the one they mean.
@@ -21,8 +21,8 @@
 		-Server
 	}
 
-	# Live video, the event stream and the worker channel go out as they come, uncompressed.
-	@compressible not path /api/cameras/*/stream.mjpeg /api/events/stream /api/workers/connect
+	# Live video and the event stream go out as they come, uncompressed.
+	@compressible not path /api/cameras/*/stream.mjpeg /api/events/stream
 	encode @compressible zstd gzip
 
 	handle /api/* {

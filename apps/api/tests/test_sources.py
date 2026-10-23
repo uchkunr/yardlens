@@ -27,8 +27,6 @@ from yardlens_api.services.sources import (
         (SourceType.RTSP, "rtsps://camera.local/live"),
         (SourceType.HTTP, "https://example.com/snapshot.jpg"),
         (SourceType.HLS, "https://example.com/live/playlist.m3u8"),
-        (SourceType.YOUTUBE, "https://www.youtube.com/watch?v=abc123"),
-        (SourceType.YOUTUBE, "https://youtu.be/abc123"),
     ],
 )
 def test_validate_accepts_supported_urls(source_type: SourceType, url: str) -> None:
@@ -41,7 +39,6 @@ def test_validate_accepts_supported_urls(source_type: SourceType, url: str) -> N
         (SourceType.RTSP, "http://camera.local/stream", "RTSP URL must start with"),
         (SourceType.HTTP, "ftp://example.com/image.jpg", "HTTP URL must start with"),
         (SourceType.HLS, "playlist.m3u8", "HLS URL must start with"),
-        (SourceType.YOUTUBE, "https://vimeo.com/123", "youtube.com or youtu.be"),
         (SourceType.FILE, "videos/missing.mp4", "Video file not found"),
     ],
 )
@@ -55,25 +52,6 @@ def test_file_paths_resolve_relative_to_base_dir(tmp_path: Path) -> None:
     # as_uri() is file:///C:/... on Windows and file:///tmp/... elsewhere.
     clip = tmp_path / "clips" / "a b.mp4"
     assert resolve_file_path(clip.as_uri(), base_dir=Path("elsewhere")) == clip
-
-
-def test_resolve_youtube_uses_resolver() -> None:
-    resolved = resolve_source(
-        SourceType.YOUTUBE,
-        "https://www.youtube.com/watch?v=live",
-        youtube_resolver=lambda url: f"https://cdn.example/{url.rsplit('=', 1)[1]}.m3u8",
-    )
-    assert resolved.uri == "https://cdn.example/live.m3u8"
-    assert resolved.kind is ReaderKind.VIDEO
-    assert not resolved.loop
-
-
-def test_resolve_youtube_propagates_resolver_errors() -> None:
-    def failing(_: str) -> str:
-        raise SourceError("stream is offline")
-
-    with pytest.raises(SourceError, match="stream is offline"):
-        resolve_source(SourceType.YOUTUBE, "https://youtu.be/x", youtube_resolver=failing)
 
 
 @pytest.mark.parametrize("kind", [ReaderKind.MJPEG, ReaderKind.SNAPSHOT])

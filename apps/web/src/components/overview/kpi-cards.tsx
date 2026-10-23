@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, ArrowDownRight, ArrowUpRight, Car, Cctv } from "lucide-react";
+import { Activity, ArrowDownRight, ArrowUpRight, Cctv } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { Card, CardAction, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -36,26 +36,15 @@ export function KpiCards({ stats }: { stats: StatsOverview }) {
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <Kpi
-        label={t.kpi.vehiclesToday}
-        value={f.count(stats.vehicles_today)}
-        icon={<Car aria-hidden />}
-        footer={t.kpi.objectsTotal(f.count(stats.objects_today))}
+        label={t.kpi.crossedIn}
+        value={f.count(stats.line_in_today)}
+        icon={<ArrowDownRight className="text-chart-2" aria-hidden />}
+        footer={t.kpi.crossingsFooter}
       />
       <Kpi
-        label={t.kpi.crossingsToday}
-        value={
-          <span className="flex items-baseline gap-3">
-            <span className="flex items-baseline gap-1">
-              <ArrowDownRight className="text-chart-2 size-5 self-center" aria-label={t.kpi.in} />
-              {f.count(stats.line_in_today)}
-            </span>
-            <span className="flex items-baseline gap-1">
-              <ArrowUpRight className="text-chart-3 size-5 self-center" aria-label={t.kpi.out} />
-              {f.count(stats.line_out_today)}
-            </span>
-          </span>
-        }
-        icon={<Activity aria-hidden />}
+        label={t.kpi.crossedOut}
+        value={f.count(stats.line_out_today)}
+        icon={<ArrowUpRight className="text-chart-3" aria-hidden />}
         footer={t.kpi.crossingsFooter}
       />
       <Kpi

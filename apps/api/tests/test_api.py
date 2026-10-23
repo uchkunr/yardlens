@@ -171,21 +171,16 @@ async def test_enabled_camera_streams_and_emits_events(
     for _ in range(50):
         events = (await client.get("/api/events", params={"camera_id": camera_id})).json()
         types = {item["type"] for item in events["items"]}
-        if {"camera_online", "object_entered"} <= types:
+        if "camera_online" in types:
             break
         await asyncio.sleep(0.1)
     else:
         raise AssertionError(f"expected events not recorded: {types}")
-
-    entered = next(item for item in events["items"] if item["type"] == "object_entered")
-    assert entered["class_name"] == "car"
-    assert entered["snapshot_url"].startswith("/media/snapshots/")
-    image = await client.get(entered["snapshot_url"])
-    assert image.status_code == 200
+    assert "object_entered" not in types, "objects coming into view are not events"
 
     disabled = await client.post(f"/api/cameras/{camera_id}/disable")
     assert disabled.json()["runtime"]["status"] == "disabled"
-    assert container.cameras.live(camera_id) is None
+    assert container.cameras.worker(camera_id) is None
 
 
 async def _insert_events(container: Container, video_file: Path) -> int:
@@ -195,14 +190,13 @@ async def _insert_events(container: Container, video_file: Path) -> int:
         session.add(camera)
         await session.flush()
         rows = [
-            Event(camera_id=camera.id, type="object_entered", class_name="car", created_at=now),
-            Event(camera_id=camera.id, type="object_entered", class_name="truck", created_at=now),
-            Event(camera_id=camera.id, type="object_entered", class_name="person", created_at=now),
             Event(camera_id=camera.id, type="line_crossed_in", class_name="car", created_at=now),
+            Event(camera_id=camera.id, type="line_crossed_in", class_name="truck", created_at=now),
             Event(camera_id=camera.id, type="line_crossed_out", class_name="car", created_at=now),
+            Event(camera_id=camera.id, type="camera_online", created_at=now),
             Event(
                 camera_id=camera.id,
-                type="object_entered",
+                type="line_crossed_in",
                 class_name="car",
                 created_at=now - timedelta(days=2),
             ),
@@ -218,7 +212,7 @@ async def test_events_filters_and_pagination(
     camera_id = await _insert_events(container, video_file)
 
     page = (await client.get("/api/events", params={"page_size": 2})).json()
-    assert page["total"] == 6
+    assert page["total"] == 5
     assert len(page["items"]) == 2
     assert page["items"][0]["camera_name"] == "Yard"
 
@@ -233,11 +227,11 @@ async def test_events_filters_and_pagination(
     by_class = (
         await client.get("/api/events", params={"class_name": "car", "camera_id": camera_id})
     ).json()
-    assert by_class["total"] == 4
+    assert by_class["total"] == 3
 
     since = (datetime.now(UTC) - timedelta(days=1)).isoformat()
     recent = (await client.get("/api/events", params={"since": since})).json()
-    assert recent["total"] == 5
+    assert recent["total"] == 4
 
     invalid = await client.get(
         "/api/events",
@@ -251,18 +245,20 @@ async def test_stats_overview(
 ) -> None:
     await _insert_events(container, video_file)
     stats = (await client.get("/api/stats/overview", params={"tz": "UTC"})).json()
-    assert stats["vehicles_today"] == 2
-    assert stats["objects_today"] == 3
-    assert stats["line_in_today"] == 1
+    assert stats["line_in_today"] == 2, "the crossing two days ago is not today's"
     assert stats["line_out_today"] == 1
+    assert stats["events_last_hour"] == 4
     assert stats["cameras_total"] == 1
     assert len(stats["hourly"]) == 24
-    assert sum(bucket["entered"] for bucket in stats["hourly"]) == 3
-    assert {item["class_name"]: item["count"] for item in stats["per_class"]} == {
-        "car": 1,
-        "truck": 1,
-        "person": 1,
-    }
+    assert sum(bucket["line_in"] for bucket in stats["hourly"]) == 2
+    assert stats["per_camera"] == [
+        {
+            "camera_id": stats["per_camera"][0]["camera_id"],
+            "camera_name": "Yard",
+            "line_in": 2,
+            "line_out": 1,
+        }
+    ]
 
     bad_tz = await client.get("/api/stats/overview", params={"tz": "Mars/Base"})
     assert bad_tz.status_code == 422
@@ -271,7 +267,7 @@ async def test_stats_overview(
 async def test_settings_roundtrip_masks_token(client: httpx.AsyncClient) -> None:
     initial = (await client.get("/api/settings")).json()
     assert initial["telegram"]["bot_token_set"] is False
-    assert initial["telegram"]["language"] == "ru"
+    assert initial["telegram"]["language"] == "en"
     assert "car" in initial["available_classes"]
 
     response = await client.put(
@@ -288,9 +284,9 @@ async def test_settings_roundtrip_masks_token(client: httpx.AsyncClient) -> None
     assert body["telegram"]["bot_token_hint"] == "••••DEFG"
     assert "123456:ABCDEFG" not in response.text
 
-    kept = await client.put("/api/settings", json={"telegram": {"chat_id": "43", "language": "en"}})
+    kept = await client.put("/api/settings", json={"telegram": {"chat_id": "43", "language": "ru"}})
     assert kept.json()["telegram"]["bot_token_set"] is True
-    assert kept.json()["telegram"]["language"] == "en"
+    assert kept.json()["telegram"]["language"] == "ru"
 
     invalid = await client.put(
         "/api/settings",

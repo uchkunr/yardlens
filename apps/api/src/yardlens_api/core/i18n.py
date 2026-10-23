@@ -8,11 +8,10 @@ from typing import Literal
 from yardlens_api.core.enums import EventType
 
 Language = Literal["ru", "en"]
-DEFAULT_LANGUAGE: Language = "ru"
+DEFAULT_LANGUAGE: Language = "en"
 
 EVENT_TITLES: dict[Language, dict[EventType, str]] = {
     "ru": {
-        EventType.OBJECT_ENTERED: "Новый объект",
         EventType.LINE_CROSSED_IN: "Пересечение линии: вход",
         EventType.LINE_CROSSED_OUT: "Пересечение линии: выход",
         EventType.CAMERA_ONLINE: "Камера в сети",
@@ -21,7 +20,6 @@ EVENT_TITLES: dict[Language, dict[EventType, str]] = {
         EventType.LOADING_COMPLETED: "Погрузка завершена",
     },
     "en": {
-        EventType.OBJECT_ENTERED: "Object detected",
         EventType.LINE_CROSSED_IN: "Line crossed (in)",
         EventType.LINE_CROSSED_OUT: "Line crossed (out)",
         EventType.CAMERA_ONLINE: "Camera online",

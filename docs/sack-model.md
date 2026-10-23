@@ -93,7 +93,9 @@ Zero-shot detection is not good enough to count; a trained detector is required.
 
 ## Demo clips (not in git)
 
-Pexels, free licence, by emirkhan bal. Saved as `apps/api/data/videos/<name>.mp4`:
+Pexels, free licence, by emirkhan bal. `bun run setup` downloads the first one as
+`videos/loading-bay.mp4` and seeds a demo camera with the line and zone below; the others go in
+`apps/api/data/videos/<name>.mp4` by hand:
 
 | File | Source (1080p) | Camera settings used |
 | --- | --- | --- |

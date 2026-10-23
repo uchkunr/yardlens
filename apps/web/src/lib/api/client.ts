@@ -29,9 +29,6 @@ export type PerformanceSettings = Schemas["PerformanceSettings"];
 export type Activity = Schemas["Activity"];
 export type LoadLevel = Schemas["LoadLevelName"];
 export type CameraDetection = Schemas["CameraDetection"];
-export type Cluster = Schemas["ClusterRead"];
-export type Worker = Schemas["WorkerRead"];
-export type WorkerCreated = Schemas["WorkerCreated"];
 
 /**
  * Where the browser opens long-lived connections (MJPEG, SSE). Empty means the dashboard's own

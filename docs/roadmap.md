@@ -1,27 +1,24 @@
 # Roadmap: architecture work not done yet
 
-Reviewed 2026-10-14. Done since that review: database writes are retried through outages, loading
-sessions survive an API restart, each camera can have its own model and classes, loading bays run
-at full rate while a vehicle is loaded, `yardlens-eval` checks counts against a recording, disk
-space is watched, CI runs on Linux and Windows, and there are sign-in, HTTPS, Docker images and
-workers on other machines ([deployment.md](deployment.md)). The sack model itself is in
-[sack-model.md](sack-model.md). What is left:
+Reviewed 2026-10-23. YardLens does two things on one server: it counts line crossings on any
+camera, and keeps a loading session per vehicle (cargo, plate, arrival and departure) at a loading
+bay. Workers on other machines, YouTube sources and per-object "object entered" events existed and
+were removed that day: they cost a third of the code and nothing the project is for needed them.
+The sack model itself is in [sack-model.md](sack-model.md). What is left:
 
 ## Users and roles
 
 Sign-in, HTTPS and masked camera passwords are done (see [deployment](deployment.md#security)).
 There is one administrator; operators who may only watch would need users with roles.
 
-## Inference outside the API process
+## Inference in a separate process
 
-Workers ([deployment](deployment.md#workers)) run cameras on other machines, and this server's
-own processing can be turned off, so a crash in native code (FFmpeg, OpenVINO, CUDA) on a worker
-no longer touches the API. Cameras that do run on the server still share its process. Next:
+Cameras run in threads of the API process, so a crash in native code (FFmpeg, OpenVINO, CUDA)
+takes the API down with them. Next:
 
-- Run this server's cameras in a local worker process too (the same agent over a local socket), so
-  the API process never runs native video code.
+- Run the cameras in a child process that the API supervises and restarts, talking over a local
+  socket, so the API process never runs native video code.
 - Batch inference across cameras on the GPU; on the CPU keep one model instance per core group.
-- Test a camera from the worker it is pinned to, not from the server.
 
 ## Live view over WebRTC or HLS
 
@@ -35,10 +32,10 @@ six streams per browser by HTTP/1.1. For viewers on phones or over the internet:
 ## Database migrations
 
 The schema is `apps/api/src/yardlens_api/db/schema.sql`, made idempotent with
-`CREATE ... IF NOT EXISTS` and `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`. Adding columns works; renaming, changing a type or
-moving data does not. Introduce Alembic before the first such change: a baseline revision matching
-the current schema, `alembic stamp head` on existing databases, and `alembic upgrade head` in
-`db-setup`.
+`CREATE ... IF NOT EXISTS` and `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`. Adding columns works;
+renaming, changing a type or moving data does not. Introduce Alembic before the first such change:
+a baseline revision matching the current schema, `alembic stamp head` on existing databases, and
+`alembic upgrade head` in `db-setup`.
 
 ## Dependency upgrades
 

@@ -114,7 +114,7 @@ async def test_events_survive_a_database_outage(
     recorder.submit(
         WorkerEvent(
             camera_id=camera_id,
-            type=EventType.OBJECT_ENTERED,
+            type=EventType.LINE_CROSSED_IN,
             occurred_at=datetime.now(UTC),
             class_name="truck",
         )
@@ -138,8 +138,8 @@ async def test_rejected_events_do_not_hold_back_the_rest(
     camera_id = await _camera(client)
     recorder = _recorder(container, container.session_factory)
     now = datetime.now(UTC)
-    gone = WorkerEvent(camera_id=999, type=EventType.OBJECT_ENTERED, occurred_at=now)
-    kept = WorkerEvent(camera_id=camera_id, type=EventType.OBJECT_ENTERED, occurred_at=now)
+    gone = WorkerEvent(camera_id=999, type=EventType.LINE_CROSSED_IN, occurred_at=now)
+    kept = WorkerEvent(camera_id=camera_id, type=EventType.LINE_CROSSED_IN, occurred_at=now)
     recorder.start()
     recorder.submit(gone)
     recorder.submit(kept)

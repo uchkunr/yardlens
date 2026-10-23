@@ -36,7 +36,6 @@ export function StatusBadge({ status, className }: { status: CameraStatus; class
 }
 
 const EVENT_TONES: Record<EventType, string> = {
-  object_entered: "bg-chart-1/12 text-chart-1 border-chart-1/25",
   line_crossed_in: "bg-chart-2/12 text-chart-2 border-chart-2/25",
   line_crossed_out: "bg-chart-3/15 text-chart-3 border-chart-3/30",
   camera_online: "bg-success/12 text-success border-success/25",

@@ -11,10 +11,9 @@ from sqlalchemy.exc import IntegrityError
 from yardlens_api.api.deps import Container, ContainerDep, SessionDep
 from yardlens_api.core.enums import SourceType
 from yardlens_api.core.errors import AppError, ConflictError, NotFoundError, SourceError
-from yardlens_api.db.models import Camera, Worker
+from yardlens_api.db.models import Camera
 from yardlens_api.schemas.camera import (
     CameraCreate,
-    CameraNode,
     CameraRead,
     CameraRuntime,
     CameraTestRequest,
@@ -78,31 +77,11 @@ def camera_config(camera: Camera) -> CameraConfig:
     )
 
 
-async def _sync(container: Container, camera: Camera) -> None:
-    """Start, update, move or stop the camera, then drop models no camera needs any more."""
-    await container.cameras.sync(
-        camera_config(camera), enabled=camera.enabled, pin=camera.worker_id
-    )
+def _sync(container: Container, camera: Camera) -> None:
+    """Start, update or stop the camera, then drop models no camera needs any more."""
+    container.cameras.sync(camera_config(camera), enabled=camera.enabled)
     general = container.settings_store.detection().model
     container.models.retain(container.cameras.models_in_use() - {general})
-
-
-async def _validate_pin(session: SessionDep, worker_id: int | None, source: SourceType) -> None:
-    if worker_id is None:
-        return
-    if source is SourceType.FILE:
-        raise InvalidSourceError("Video files are processed on the server")
-    if await session.get(Worker, worker_id) is None:
-        raise InvalidSourceError(f"Worker {worker_id} not found")
-
-
-def _node(container: Container, camera_id: int) -> CameraNode | None:
-    placement = container.cameras.placement(camera_id)
-    if placement is None:
-        return None
-    worker_id = placement.worker_id
-    name = container.cameras.worker_name(worker_id) if worker_id is not None else None
-    return CameraNode(worker_id=worker_id, worker_name=name)
 
 
 async def _validate_detection(container: Container, own: CameraDetection | None) -> None:
@@ -138,8 +117,6 @@ def to_camera_read(camera: Camera, container: Container) -> CameraRead:
         zone=LoadingZone.model_validate(camera.zone) if camera.zone else None,
         plate_url=mask_url(camera.plate_url) if camera.plate_url else None,
         detection=_own_detection(camera),
-        worker_id=camera.worker_id,
-        node=_node(container, camera.id),
         created_at=camera.created_at,
         updated_at=camera.updated_at,
         runtime=CameraRuntime(
@@ -207,7 +184,6 @@ async def create_camera(
     _validate(container, payload.source_type, payload.url)
     plate_url = _validate_plate_url(payload.plate_url)
     await _validate_detection(container, payload.detection)
-    await _validate_pin(session, payload.worker_id, payload.source_type)
     camera = Camera(
         name=payload.name,
         source_type=payload.source_type.value,
@@ -218,12 +194,11 @@ async def create_camera(
         zone=payload.zone.model_dump() if payload.zone else None,
         plate_url=plate_url,
         detection=payload.detection.model_dump(exclude_none=True) if payload.detection else None,
-        worker_id=payload.worker_id,
     )
     session.add(camera)
     await _commit(session)
     await session.refresh(camera)
-    await _sync(container, camera)
+    _sync(container, camera)
     return to_camera_read(camera, container)
 
 
@@ -330,14 +305,9 @@ async def update_camera(
         camera.detection = (
             payload.detection.model_dump(exclude_none=True) if payload.detection else None
         )
-    if "worker_id" in changes:
-        camera.worker_id = payload.worker_id
-    if "worker_id" in changes or "source_type" in changes:
-        await _validate_pin(session, camera.worker_id, source_type)
-
     await _commit(session)
     await session.refresh(camera)
-    await _sync(container, camera)
+    _sync(container, camera)
     return to_camera_read(camera, container)
 
 
@@ -360,14 +330,14 @@ async def _set_enabled(
     camera.enabled = enabled
     await session.commit()
     await session.refresh(camera)
-    await _sync(container, camera)
+    _sync(container, camera)
     return to_camera_read(camera, container)
 
 
 @router.delete("/{camera_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_camera(camera_id: int, container: ContainerDep, session: SessionDep) -> Response:
     camera = await _get_camera(session, camera_id)
-    await container.cameras.remove(camera_id)
+    container.cameras.remove(camera_id)
     await delete_snapshots_for_camera(session, camera_id, container.settings.snapshots_dir)
     await remove_snapshot_files(
         container.settings.snapshots_dir, await session_snapshot_paths(session, camera_id)

@@ -115,28 +115,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/workers/ca.pem": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Certificate Authority
-         * @description The certificate authority behind this server's HTTPS. Public, like any CA certificate:
-         *     workers check it against the fingerprint in their command; people install it so browsers
-         *     trust the dashboard.
-         */
-        get: operations["certificate_authority_api_workers_ca_pem_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/health": {
         parameters: {
             query?: never;
@@ -166,6 +144,27 @@ export interface paths {
          * @description Machine load, what the governor allows right now and how fast each camera runs.
          */
         get: operations["resources_api_system_resources_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/system/ca.pem": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Certificate Authority
+         * @description The certificate authority behind this server's HTTPS, for people to install so their
+         *     browsers trust the dashboard on the local network.
+         */
+        get: operations["certificate_authority_api_system_ca_pem_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -517,92 +516,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/workers": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Workers
-         * @description Every worker with its load and cameras, and what this server processes itself.
-         */
-        get: operations["list_workers_api_workers_get"];
-        put?: never;
-        /**
-         * Create Worker
-         * @description Add a worker. The token, and the commands carrying it, are shown this once.
-         */
-        post: operations["create_worker_api_workers_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/workers/{worker_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /**
-         * Delete Worker
-         * @description Remove a worker: its token stops working at once and its cameras move elsewhere.
-         */
-        delete: operations["delete_worker_api_workers__worker_id__delete"];
-        options?: never;
-        head?: never;
-        /** Rename Worker */
-        patch: operations["rename_worker_api_workers__worker_id__patch"];
-        trace?: never;
-    };
-    "/api/workers/rebalance": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Rebalance
-         * @description Spread the automatically placed cameras evenly over the nodes online now. Cameras that
-         *     move start over (tracking, an open loading session carries on).
-         */
-        post: operations["rebalance_api_workers_rebalance_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/workers/local": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /**
-         * Set Local Processing
-         * @description Whether this server processes cameras too, or leaves them all to the workers.
-         */
-        put: operations["set_local_processing_api_workers_local_put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -629,8 +542,6 @@ export interface components {
             camera_id: number;
             /** Camera Name */
             camera_name: string;
-            /** Entered */
-            entered: number;
             /** Line In */
             line_in: number;
             /** Line Out */
@@ -661,11 +572,6 @@ export interface components {
              */
             plate_url?: string | null;
             detection?: components["schemas"]["CameraDetection"] | null;
-            /**
-             * Worker Id
-             * @description Process the camera on this worker only; null places it automatically (video files always run on the server)
-             */
-            worker_id?: number | null;
         };
         /**
          * CameraDetection
@@ -699,26 +605,6 @@ export interface components {
             max_fps: number;
             /** Hardware Decoding */
             hardware_decoding: boolean;
-            /**
-             * Worker Id
-             * @description The worker it runs on; None: here
-             */
-            worker_id?: number | null;
-            /** Worker Name */
-            worker_name?: string | null;
-        };
-        /**
-         * CameraNode
-         * @description Where a camera is processed right now.
-         */
-        CameraNode: {
-            /**
-             * Worker Id
-             * @description None: this server
-             */
-            worker_id: number | null;
-            /** Worker Name */
-            worker_name?: string | null;
         };
         /** CameraRead */
         CameraRead: {
@@ -738,13 +624,6 @@ export interface components {
             /** Plate Url */
             plate_url: string | null;
             detection: components["schemas"]["CameraDetection"] | null;
-            /**
-             * Worker Id
-             * @description The worker it is pinned to; null: automatic
-             */
-            worker_id: number | null;
-            /** @description Where it runs now; null: nowhere (disabled, or waiting for a node) */
-            node: components["schemas"]["CameraNode"] | null;
             /**
              * Created At
              * Format: date-time
@@ -877,38 +756,6 @@ export interface components {
             plate_url?: string | null;
             /** @description The camera's own detection settings; null follows the general */
             detection?: components["schemas"]["CameraDetection"] | null;
-            /**
-             * Worker Id
-             * @description Process the camera on this worker only; null places it automatically (video files always run on the server)
-             */
-            worker_id?: number | null;
-        };
-        /** ClassCount */
-        ClassCount: {
-            /** Class Name */
-            class_name: string;
-            /** Count */
-            count: number;
-        };
-        /** ClusterRead */
-        ClusterRead: {
-            /**
-             * Local Processing
-             * @description This server processes cameras as well
-             */
-            local_processing: boolean;
-            /**
-             * Local Cameras
-             * @description Cameras this server processes
-             */
-            local_cameras: number[];
-            /**
-             * Unplaced Cameras
-             * @description Enabled cameras no node can take right now
-             */
-            unplaced_cameras: number[];
-            /** Workers */
-            workers: components["schemas"]["WorkerRead"][];
         };
         /**
          * CountingLine
@@ -1041,7 +888,7 @@ export interface components {
          * EventType
          * @enum {string}
          */
-        EventType: "object_entered" | "line_crossed_in" | "line_crossed_out" | "camera_online" | "camera_offline" | "vehicle_arrived" | "loading_completed";
+        EventType: "line_crossed_in" | "line_crossed_out" | "camera_online" | "camera_offline" | "vehicle_arrived" | "loading_completed";
         /** GpuInfo */
         GpuInfo: {
             /** Name */
@@ -1089,8 +936,6 @@ export interface components {
              * Format: date-time
              */
             hour: string;
-            /** Entered */
-            entered: number;
             /** Line In */
             line_in: number;
             /** Line Out */
@@ -1281,11 +1126,6 @@ export interface components {
             /** Points */
             points: components["schemas"]["ZonePoint"][];
         };
-        /** LocalProcessingUpdate */
-        LocalProcessingUpdate: {
-            /** Enabled */
-            enabled: boolean;
-        };
         /** LoginRequest */
         LoginRequest: {
             /** Username */
@@ -1306,33 +1146,6 @@ export interface components {
              * @description Resident memory of the YardLens API
              */
             process_bytes: number;
-        };
-        /**
-         * NodeLoad
-         * @description A node's latest resource sample.
-         */
-        NodeLoad: {
-            /** Cpu Percent */
-            cpu_percent: number;
-            /** Process Cpu Percent */
-            process_cpu_percent: number;
-            /** Memory Percent */
-            memory_percent: number;
-            /** Gpu Percent */
-            gpu_percent?: number | null;
-            /** Detector Busy Percent */
-            detector_busy_percent: number;
-            /** Disk Free Bytes */
-            disk_free_bytes?: number | null;
-            level: components["schemas"]["LoadLevelName"];
-            /** Model */
-            model: string;
-            /**
-             * Optimizing
-             * @description Preparing an OpenVINO copy of the model
-             * @default false
-             */
-            optimizing: boolean;
         };
         /** PasswordChange */
         PasswordChange: {
@@ -1403,16 +1216,15 @@ export interface components {
          * SourceType
          * @enum {string}
          */
-        SourceType: "rtsp" | "http" | "hls" | "youtube" | "file";
+        SourceType: "rtsp" | "http" | "hls" | "file";
         /** StatsOverview */
         StatsOverview: {
             /** Timezone */
             timezone: string;
-            /** Vehicles Today */
-            vehicles_today: number;
-            /** Objects Today */
-            objects_today: number;
-            /** Line In Today */
+            /**
+             * Line In Today
+             * @description Line crossings in, across every camera
+             */
             line_in_today: number;
             /** Line Out Today */
             line_out_today: number;
@@ -1422,11 +1234,12 @@ export interface components {
             cameras_online: number;
             /** Cameras Total */
             cameras_total: number;
-            /** Per Class */
-            per_class: components["schemas"]["ClassCount"][];
             /** Per Camera */
             per_camera: components["schemas"]["CameraCount"][];
-            /** Hourly */
+            /**
+             * Hourly
+             * @description The last 24 hours, oldest first
+             */
             hourly: components["schemas"]["HourlyBucket"][];
         };
         /** SystemResources */
@@ -1531,107 +1344,6 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
-        };
-        /**
-         * WorkerCommands
-         * @description Ready-made commands that start the worker on another machine.
-         */
-        WorkerCommands: {
-            /** Cpu */
-            cpu: string;
-            /**
-             * Gpu
-             * @description For machines with an NVIDIA GPU
-             */
-            gpu: string;
-        };
-        /** WorkerCreate */
-        WorkerCreate: {
-            /** Name */
-            name: string;
-        };
-        /** WorkerCreated */
-        WorkerCreated: {
-            worker: components["schemas"]["WorkerRead"];
-            /**
-             * Token
-             * @description Shown once: only its hash is stored
-             */
-            token: string;
-            commands: components["schemas"]["WorkerCommands"];
-        };
-        /**
-         * WorkerInfo
-         * @description The worker's machine, as it reports it on connecting.
-         */
-        WorkerInfo: {
-            /** Hostname */
-            hostname: string;
-            /** Platform */
-            platform: string;
-            /** Version */
-            version: string;
-            /** Logical Cpus */
-            logical_cpus: number;
-            /** Physical Cores */
-            physical_cores: number;
-            /**
-             * Cpu Limit
-             * @description CPUs the worker's container may use, when it is limited
-             */
-            cpu_limit?: number | null;
-            /** Memory Total Bytes */
-            memory_total_bytes: number;
-            /** Gpu */
-            gpu?: string | null;
-            /**
-             * Backend
-             * @description pytorch or openvino
-             */
-            backend: string;
-            /** Device */
-            device: string;
-        };
-        /** WorkerRead */
-        WorkerRead: {
-            /** Id */
-            id: number;
-            /** Name */
-            name: string;
-            /** Online */
-            online: boolean;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /**
-             * Last Seen At
-             * @description Now while online; when it left otherwise
-             */
-            last_seen_at: string | null;
-            /** Address */
-            address: string | null;
-            /** Version */
-            version: string | null;
-            /** @description None until it has connected once */
-            info: components["schemas"]["WorkerInfo"] | null;
-            /**
-             * Clock Offset Seconds
-             * @description How far the worker's clock is behind the server's (negative: ahead); None while offline. Its times are corrected by this much.
-             */
-            clock_offset_seconds: number | null;
-            load: components["schemas"]["NodeLoad"] | null;
-            /**
-             * Cameras
-             * @description Cameras this worker processes
-             */
-            cameras: number[];
-        };
-        /** WorkerUpdate */
-        WorkerUpdate: {
-            /** Name */
-            name: string;
         };
         /** ZonePoint */
         ZonePoint: {
@@ -1789,26 +1501,6 @@ export interface operations {
             };
         };
     };
-    certificate_authority_api_workers_ca_pem_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/x-pem-file": unknown;
-                };
-            };
-        };
-    };
     health_api_health_get: {
         parameters: {
             query?: never;
@@ -1845,6 +1537,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SystemResources"];
+                };
+            };
+        };
+    };
+    certificate_authority_api_system_ca_pem_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/x-pem-file": unknown;
                 };
             };
         };
@@ -2556,176 +2268,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TelegramTestResult"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_workers_api_workers_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ClusterRead"];
-                };
-            };
-        };
-    };
-    create_worker_api_workers_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["WorkerCreate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WorkerCreated"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_worker_api_workers__worker_id__delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                worker_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    rename_worker_api_workers__worker_id__patch: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                worker_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["WorkerUpdate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WorkerRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    rebalance_api_workers_rebalance_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ClusterRead"];
-                };
-            };
-        };
-    };
-    set_local_processing_api_workers_local_put: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["LocalProcessingUpdate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ClusterRead"];
                 };
             };
             /** @description Validation Error */

@@ -3,7 +3,6 @@ import type { EventType, SourceType } from "@/lib/api/client";
 // Language-dependent formatting lives in `@/i18n/format` (use `useI18n().f`).
 
 export const EVENT_TYPES: EventType[] = [
-  "object_entered",
   "line_crossed_in",
   "line_crossed_out",
   "camera_online",
@@ -12,13 +11,12 @@ export const EVENT_TYPES: EventType[] = [
   "loading_completed",
 ];
 
-export const SOURCE_TYPES: SourceType[] = ["rtsp", "http", "hls", "youtube", "file"];
+export const SOURCE_TYPES: SourceType[] = ["rtsp", "http", "hls", "file"];
 
 export const SOURCE_URL_PLACEHOLDERS: Record<SourceType, string> = {
   rtsp: "rtsp://user:pass@192.168.1.20:554/stream1",
   http: "https://example.com/camera/snapshot.jpg",
   hls: "https://example.com/live/playlist.m3u8",
-  youtube: "https://www.youtube.com/watch?v=…",
   file: "videos/vehicles.mp4",
 };
 

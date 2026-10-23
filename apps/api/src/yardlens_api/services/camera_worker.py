@@ -654,7 +654,6 @@ class CameraWorker:
         batches: tuple[tuple[EventType, list[TrackedObject]], ...] = tuple(
             (event_type, [obj for obj in objects if obj.class_name not in cargo])
             for event_type, objects in (
-                (EventType.OBJECT_ENTERED, observation.entered),
                 (EventType.LINE_CROSSED_IN, observation.crossed_in),
                 (EventType.LINE_CROSSED_OUT, observation.crossed_out),
             )

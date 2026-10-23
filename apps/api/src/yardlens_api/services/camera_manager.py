@@ -120,16 +120,6 @@ class CameraManager:
         self._retire(camera_id)
         self._names.pop(camera_id, None)
 
-    def release(self, camera_id: int) -> InterruptedSession | None:
-        """Stop the camera here because another node takes it over; its open loading session
-        is left open and returned, for that node to carry on."""
-        worker = self._workers.get(camera_id)
-        if worker is None:
-            return None
-        session = worker.handoff()
-        self._retire(camera_id, detach=True)
-        return session
-
     def _retire(self, camera_id: int, *, detach: bool = False) -> None:
         worker = self._workers.pop(camera_id, None)
         if worker is None:

@@ -43,9 +43,6 @@ dependencies = [
     "ultralytics>=8.4.174",
     "uvicorn[standard]>=0.54.0",
     "watchfiles>=1.3.0",
-    # The worker's connection to the server.
-    "websockets>=17.2",
-    "yt-dlp[default]>=2026.8.19",
 ]
 
 [project.scripts]
@@ -55,7 +52,6 @@ seed = "yardlens_api.seed:main"
 yardlens-bench = "yardlens_api.bench:main"
 yardlens-eval = "yardlens_api.evaluate:main"
 yardlens-admin = "yardlens_api.admin:main"
-yardlens-worker = "yardlens_api.worker.main:main"
 
 [build-system]
 requires = ["uv_build>=0.12.23,<0.13.0"]

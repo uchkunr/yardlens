@@ -31,7 +31,6 @@ from yardlens_api.api.routes import (
     stats,
     streams,
     system,
-    workers,
 )
 from yardlens_api.api.routes.cameras import camera_config
 from yardlens_api.api.security import (
@@ -50,7 +49,6 @@ from yardlens_api.db.session import create_engine, create_session_factory, init_
 from yardlens_api.services.auth import AuthService
 from yardlens_api.services.camera_manager import CameraManager
 from yardlens_api.services.camera_worker import WorkerOptions
-from yardlens_api.services.cluster import Cluster
 from yardlens_api.services.detector import Detector, ModelPool, YoloDetector
 from yardlens_api.services.event_bus import EventBus
 from yardlens_api.services.event_recorder import EventRecorder
@@ -100,7 +98,7 @@ def create_app(
         tasks.spawn(_revocation_loop(container), "revocations")
         container.monitor.start()
         container.recorder.start()
-        await _start_workers(container)
+        await _start_cameras(container)
         logger.info("YardLens API started", extra={"version": app.version})
         try:
             yield
@@ -140,10 +138,8 @@ def create_app(
         return {"status": "ok"}
 
     app.include_router(auth.router, prefix="/api")
-    # Workers sign in with their own token.
-    app.include_router(workers.agent_router, prefix="/api")
     signed_in = [Depends(require_user)]
-    for module in (health, system, cameras, streams, events, stats, loading, settings, workers):
+    for module in (health, system, cameras, streams, events, stats, loading, settings):
         app.include_router(module.router, prefix="/api", dependencies=signed_in)
     app.mount(
         SNAPSHOTS_URL_PREFIX,
@@ -268,23 +264,6 @@ async def build_container(config: Settings, detector: Detector | None) -> Contai
         detector_for=models.get,
         names=names,
     )
-
-    def local_capacity() -> float:
-        # The server also runs the database and the dashboard: it counts for a bit less.
-        gpu = resolved_detector.status.device.startswith("cuda")
-        return plan.physical_cores * 0.75 * (4.0 if gpu else 1.0)
-
-    cluster = Cluster(
-        manager,
-        session_factory=session_factory,
-        recorder=recorder,
-        settings_store=store,
-        snapshots_dir=config.snapshots_dir,
-        names=names,
-        local_available=config.workers_enabled,
-        local_capacity=local_capacity,
-        save_images=lambda: monitor.limits().save_images,
-    )
     return Container(
         settings=config,
         engine=engine,
@@ -292,7 +271,7 @@ async def build_container(config: Settings, detector: Detector | None) -> Contai
         detector=resolved_detector,
         models=models,
         settings_store=store,
-        cameras=cluster,
+        cameras=manager,
         bus=bus,
         recorder=recorder,
         notifier=notifier,
@@ -303,18 +282,18 @@ async def build_container(config: Settings, detector: Detector | None) -> Contai
     )
 
 
-async def _start_workers(container: Container) -> None:
+async def _start_cameras(container: Container) -> None:
+    """Start every enabled camera, carrying on loading sessions a restart cut off."""
     async with container.session_factory() as session:
         rows = (await session.scalars(select(Camera).order_by(Camera.id))).all()
-        # Every enabled camera runs somewhere: here, or on a worker that kept it running.
         running = {camera.id for camera in rows if camera.enabled}
         resumable, closed = await take_interrupted_sessions(session, running_cameras=running)
     if closed:
         logger.info("Closed loading sessions cut off by a restart", extra={"count": closed})
-    await container.cameras.start(
-        ((camera_config(camera), camera.enabled, camera.worker_id) for camera in rows),
-        resumable,
-    )
+    for camera in rows:
+        container.cameras.sync(
+            camera_config(camera), enabled=camera.enabled, resume=resumable.get(camera.id)
+        )
     general = container.settings_store.detection().model
     container.models.retain(container.cameras.models_in_use() - {general})
 

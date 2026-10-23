@@ -154,11 +154,6 @@ export function CamerasSettings() {
                     </TableCell>
                     <TableCell className="hidden sm:table-cell">
                       <StatusBadge status={camera.runtime.status} />
-                      {camera.node?.worker_name ? (
-                        <div className="text-muted-foreground mt-1 max-w-40 truncate text-xs">
-                          {camera.node.worker_name}
-                        </div>
-                      ) : null}
                     </TableCell>
                     <TableCell className="hidden text-right tabular-nums lg:table-cell">{camera.inference_fps}</TableCell>
                     <TableCell className="text-muted-foreground hidden lg:table-cell">

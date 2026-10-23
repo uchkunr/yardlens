@@ -27,7 +27,6 @@ SESSION_COOKIE = "yl_session"
 REFRESH_PATH = "/api/auth"
 CSRF_HEADER = "x-yardlens-request"
 _UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
-# Workers authenticate with their own token and never use cookies.
 
 
 def _auth(connection: HTTPConnection) -> AuthService:

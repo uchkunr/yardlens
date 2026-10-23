@@ -35,13 +35,7 @@ cp apps/web/.env.example apps/web/.env.local
 | `YARDLENS_ADMIN_USERNAME` / `YARDLENS_ADMIN_PASSWORD` | unset | Create the administrator on first start; otherwise `uv run yardlens-admin create` |
 | `YARDLENS_AUTH_SECRET` | generated | Signs access tokens; generated once into the data directory when unset |
 | `YARDLENS_FORWARDED_ALLOW_IPS` | `127.0.0.1` | Proxies whose `X-Forwarded-*` headers are trusted (Caddy) |
-| `YARDLENS_WORKERS_ENABLED` | `true` | `false`: this server never processes cameras itself |
-| `YARDLENS_WORKER_IMAGE` | `ghcr.io/uchkunr/yardlens` | The image in the dashboard's worker command |
-| `YARDLENS_WORKER_SERVER_URL` | `YARDLENS_PUBLIC_URL` | The address workers connect to |
-| `YARDLENS_CA_CERT_PATH` | unset | The certificate authority behind HTTPS: offered for download, pinned by workers |
-
-A worker (`yardlens-worker`) reads `YARDLENS_SERVER`, `YARDLENS_WORKER_TOKEN` and
-`YARDLENS_CA_PIN`, which its command from the dashboard sets, plus the inference variables above.
+| `YARDLENS_CA_CERT_PATH` | unset | The certificate authority behind HTTPS, offered for download under Settings → System |
 
 Telegram credentials are deliberately not environment variables; they're set in the UI and stored
 server-side, and the API only ever returns a masked hint of the token.
@@ -58,13 +52,14 @@ any `.env` file. If you change it, update `YARDLENS_CORS_ORIGINS` to match.
 ## API endpoints
 
 Everything lives under `/api`; the full schema is at `/docs` (off in production). Everything except
-signing in and the worker endpoints needs a signed-in user. Event snapshots are served from
-`/media/snapshots/`, also to signed-in users only.
+signing in needs a signed-in user. Event snapshots are served from `/media/snapshots/`, also to
+signed-in users only.
 
 | Endpoint | Purpose |
 | --- | --- |
 | `GET /api/health` | Version, uptime, cameras online, model and device |
 | `GET /api/system/resources` | CPU, memory and GPU load, the governor's level and each camera's current rate |
+| `GET /api/system/ca.pem` | The certificate authority behind the server's HTTPS, when it has one |
 | `GET, POST /api/cameras` | List and create cameras |
 | `POST /api/cameras/test` | Grab one frame from a source without saving it |
 | `GET, PATCH, DELETE /api/cameras/{id}` | Read, update (the running worker picks up the change, including its own `detection` settings), delete |
@@ -83,6 +78,3 @@ signing in and the worker endpoints needs a signed-in user. Event snapshots are 
 | `GET /api/settings/models/{model}/classes` | The classes a model detects, for a camera's own settings |
 | `POST /api/settings/telegram/test` | Send a test message |
 | `POST /api/auth/login`, `/refresh`, `/logout`, `/logout-all`, `/password`; `GET /api/auth/me` | Sign-in with HttpOnly cookies (see [deployment](deployment.md#security)) |
-| `GET, POST /api/workers`; `PATCH, DELETE /api/workers/{id}` | Workers with their load and cameras; adding one returns its token and start command once |
-| `PUT /api/workers/local`, `POST /api/workers/rebalance` | Whether this server processes cameras; spread cameras over the nodes |
-| `WS /api/workers/connect` | The worker channel (worker token; see `schemas/worker_protocol.py`) |

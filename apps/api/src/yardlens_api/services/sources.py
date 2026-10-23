@@ -1,7 +1,7 @@
 """Camera source resolution and frame readers.
 
 A camera is configured with a ``SourceType`` and a URL. ``resolve_source`` validates the pair and
-turns it into a ``ResolvedSource`` (for YouTube this means asking yt-dlp for the live HLS URL).
+turns it into a ``ResolvedSource``.
 ``open_reader`` then opens a ``FrameReader`` that yields decoded BGR frames.
 
 Readers split reading into ``grab`` (take the next frame off the stream) and ``retrieve`` (turn it
@@ -17,7 +17,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Protocol, cast
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 
@@ -33,9 +33,6 @@ logger = logging.getLogger(__name__)
 
 type Frame = NDArray[np.uint8]
 
-_YOUTUBE_HOSTS = frozenset(
-    {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "music.youtube.com"}
-)
 _JPEG_START = b"\xff\xd8"
 _JPEG_END = b"\xff\xd9"
 _MAX_MJPEG_BUFFER = 8 * 1024 * 1024
@@ -74,9 +71,6 @@ class FrameReader(Protocol):
     def close(self) -> None: ...
 
 
-type YoutubeResolver = Callable[[str], str]
-
-
 def _require_scheme(url: str, schemes: set[str], label: str) -> None:
     parsed = urlparse(url)
     if parsed.scheme.lower() not in schemes or not parsed.netloc:
@@ -91,11 +85,6 @@ def validate_source(source_type: SourceType, url: str, *, base_dir: Path | None 
             _require_scheme(url, {"rtsp", "rtsps"}, "RTSP")
         case SourceType.HTTP | SourceType.HLS:
             _require_scheme(url, {"http", "https"}, source_type.value.upper())
-        case SourceType.YOUTUBE:
-            _require_scheme(url, {"http", "https"}, "YouTube")
-            host = (urlparse(url).hostname or "").lower()
-            if host not in _YOUTUBE_HOSTS:
-                raise SourceError("YouTube URL must point to youtube.com or youtu.be")
         case SourceType.FILE:
             path = resolve_file_path(url, base_dir=base_dir)
             if not path.is_file():
@@ -111,31 +100,6 @@ def resolve_file_path(url: str, *, base_dir: Path | None = None) -> Path:
     if not path.is_absolute() and base_dir is not None:
         path = base_dir / path
     return path
-
-
-def resolve_youtube(url: str) -> str:
-    """Resolve a YouTube watch URL to a direct HLS/media URL using yt-dlp."""
-    from yt_dlp import YoutubeDL  # pyright: ignore[reportMissingTypeStubs]
-
-    options: dict[str, Any] = {
-        "quiet": True,
-        "no_warnings": True,
-        "noplaylist": True,
-        "skip_download": True,
-        "format": "best[height<=720][protocol^=m3u8]/best[height<=720]/best",
-        "js_runtimes": {"deno": {}, "node": {}, "bun": {}},
-    }
-    try:
-        with YoutubeDL(cast("Any", options)) as ydl:
-            info = cast("dict[str, Any] | None", ydl.extract_info(url, download=False))  # pyright: ignore[reportUnknownMemberType]
-    except Exception as exc:
-        raise SourceError(f"yt-dlp could not resolve the stream: {_short_error(exc)}") from exc
-    if not info:
-        raise SourceError("yt-dlp returned no stream information")
-    stream_url = info.get("url")
-    if not isinstance(stream_url, str) or not stream_url:
-        raise SourceError("No playable stream found for this YouTube URL")
-    return stream_url
 
 
 def _short_error(exc: BaseException) -> str:
@@ -167,15 +131,12 @@ def resolve_source(
     url: str,
     *,
     base_dir: Path | None = None,
-    youtube_resolver: YoutubeResolver = resolve_youtube,
     http_prober: Callable[[str], ReaderKind] = probe_http_kind,
 ) -> ResolvedSource:
     validate_source(source_type, url, base_dir=base_dir)
     match source_type:
         case SourceType.RTSP | SourceType.HLS:
             return ResolvedSource(uri=url, kind=ReaderKind.VIDEO)
-        case SourceType.YOUTUBE:
-            return ResolvedSource(uri=youtube_resolver(url), kind=ReaderKind.VIDEO)
         case SourceType.HTTP:
             return ResolvedSource(uri=url, kind=http_prober(url))
         case SourceType.FILE:

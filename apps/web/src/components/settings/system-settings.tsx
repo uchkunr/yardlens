@@ -32,7 +32,7 @@ function Indicator({ ok, label }: { ok: boolean; label: string }) {
   );
 }
 
-const CA_URL = "/api/workers/ca.pem";
+const CA_URL = "/api/system/ca.pem";
 
 /** The SHA-256 of the certificate in a PEM file, as browsers and operating systems show it. */
 async function fingerprint(pem: string): Promise<string> {

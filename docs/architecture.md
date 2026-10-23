@@ -25,10 +25,7 @@ EventRecorder
 ```
 
 The dashboard talks to the API in two ways: short JSON requests go through a same-origin Next.js
-rewrite, while MJPEG streams and the SSE connection go to the API directly. Cameras can also run
-on other machines: a worker runs the same `CameraWorker` and sends its events over a WebSocket
-(`schemas/worker_protocol.py`; placement, leases and epochs are explained at the top of
-`services/cluster.py`).
+rewrite, while MJPEG streams and the SSE connection go to the API directly.
 
 ## Design decisions
 
@@ -59,12 +56,13 @@ only its latest state is kept, since every update carries the whole of it. Rows 
 refuses outright, such as an event for a camera deleted a moment earlier, are dropped one at a
 time, so they never hold the others back.
 
-**Events, not detections.** Workers never persist per-frame detections. They emit a handful of event
-types: `object_entered`, `line_crossed_in`, `line_crossed_out`, `camera_online`, `camera_offline`,
-`vehicle_arrived` and `loading_completed`. A track only counts once ByteTrack has confirmed it with
-two consecutive matches, and a line crossing is triggered by the bottom center of the box, which is
-where a vehicle actually meets the road. Storage grows with activity rather than with frame rate, and
-every detection event carries a downscaled JPEG snapshot.
+**Events, not detections.** Workers never persist per-frame detections, and an object merely coming
+into view is not an event either. They emit a handful of event types: `line_crossed_in`,
+`line_crossed_out`, `camera_online`, `camera_offline`, `vehicle_arrived` and `loading_completed`. A
+track only counts once ByteTrack has confirmed it with two consecutive matches, and a line crossing
+is triggered by the bottom center of the box, which is where a vehicle actually meets the road.
+Storage grows with activity rather than with frame rate, and every crossing carries a downscaled
+JPEG snapshot.
 
 **Workers know nothing about asyncio or the database.** They hand events to the event loop, where the
 `EventRecorder` batches them into PostgreSQL (up to 100 events or 250 ms, whichever comes first),
@@ -72,8 +70,8 @@ publishes them on the SSE bus and sends notifications. Its queue is bounded at 1
 database falls that far behind, events are dropped with a warning rather than stalling capture.
 
 **Reconnecting is the normal path.** Streams drop, so a worker reconnects with exponential backoff
-(1 s doubling to 60 s, ±20% jitter) and treats 20 s without a frame as a stall. YouTube URLs expire,
-so they're re-resolved with yt-dlp on every reconnect. Status changes reach the UI over SSE.
+(1 s doubling to 60 s, ±20% jitter) and treats 20 s without a frame as a stall. Status changes
+reach the UI over SSE.
 
 **The browser's connection limit shapes the frontend.** Browsers allow about six HTTP/1.1 connections
 per origin and every MJPEG stream holds one open. That's why long-lived connections bypass the Next.js
@@ -85,8 +83,8 @@ HTTP/2 behind Caddy), and one app-wide SSE connection updates the TanStack Query
 types and the type checker points at everything that broke.
 
 **Plain SQL instead of migrations, for now.** [`schema.sql`](../apps/api/src/yardlens_api/db/schema.sql)
-holds the eight tables (cameras, events, loading sessions, settings, users, refresh tokens, workers
-and camera assignments), idempotent (`CREATE … IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`) and
+holds the six tables (cameras, events, loading sessions, settings, users and refresh tokens),
+idempotent (`CREATE … IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`) and
 applied by `uv run db-setup`. Adding columns works; the first rename or type change should bring in
 Alembic ([roadmap](roadmap.md#database-migrations)).
 
@@ -163,7 +161,7 @@ standby and active, and how many cameras can be active at once under the limit. 
 server with a clip from the real camera. For the cameras themselves: H.264 rather than H.265, 10–12
 fps, and the sub-stream for analysis. On a CPU-only server an Intel i5-12400 (not the F model) is
 worth choosing over the 12400F or a Ryzen 5 5600: its integrated graphics decode the video. Past
-what one machine can do, add [workers](deployment.md#workers).
+what one machine can do, you want a GPU.
 
 ## Project layout
 
@@ -176,15 +174,13 @@ apps/
 │   │   ├── bench.py              `yardlens-bench`: cost of a camera on this machine
 │   │   ├── evaluate.py           `yardlens-eval`: count a recording, compare with a known count
 │   │   ├── api/routes/           auth, health, system, cameras, streams, events, stats, loading,
-│   │   │                         settings, workers
+│   │   │                         settings
 │   │   ├── core/                 settings (YARDLENS_*), logging, errors, security primitives
 │   │   ├── db/, schemas/         SQLAlchemy models and schema.sql, Pydantic v2 schemas
 │   │   ├── services/
 │   │   │   ├── sources.py        source validation, URL resolution, frame readers
 │   │   │   ├── camera_worker.py  capture, inference and render threads
 │   │   │   ├── camera_manager.py worker lifecycle, live reconfiguration
-│   │   │   ├── cluster.py        cameras across this server and the workers
-│   │   │   ├── remote.py         the server side of a worker connection
 │   │   │   ├── detector.py       shared YOLO model, PyTorch or OpenVINO
 │   │   │   ├── pacing.py         inference rate by activity, analysis region
 │   │   │   ├── governor.py       load levels and the frame rates they allow
@@ -197,7 +193,6 @@ apps/
 │   │   │   ├── event_recorder.py batching, SSE, notifications
 │   │   │   ├── auth.py           users, sessions, sign-in throttling
 │   │   │   └── notifier.py       Telegram
-│   │   └── worker/               `yardlens-worker`: the agent that runs on other machines
 │   └── tests/
 └── web/                          Next.js dashboard (Bun)
     └── src/
@@ -205,7 +200,7 @@ apps/
         ├── components/           pages, settings forms, editors, shadcn/ui primitives
         ├── i18n/                 Russian (default) and English copy, formatting
         └── lib/api/              client and types generated from OpenAPI
-deploy/                           Docker Compose, Caddy, worker compose; systemd units, Windows tasks
+deploy/                           Docker Compose, Caddy; systemd units, Windows tasks
 docs/                             this file, configuration, deployment, sack model plan, roadmap
 ```
 

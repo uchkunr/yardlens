@@ -51,22 +51,6 @@ class LoadingZone(BaseModel):
     points: Annotated[list[ZonePoint], Field(min_length=3, max_length=24)]
 
 
-WorkerPin = Annotated[
-    int | None,
-    Field(
-        description="Process the camera on this worker only; null places it automatically "
-        "(video files always run on the server)"
-    ),
-]
-
-
-class CameraNode(BaseModel):
-    """Where a camera is processed right now."""
-
-    worker_id: int | None = Field(description="None: this server")
-    worker_name: str | None = None
-
-
 class CameraCreate(BaseModel):
     name: CameraName
     source_type: SourceType
@@ -77,7 +61,6 @@ class CameraCreate(BaseModel):
     zone: LoadingZone | None = None
     plate_url: PlateUrl = None
     detection: CameraDetection | None = None
-    worker_id: WorkerPin = None
 
 
 class CameraUpdate(BaseModel):
@@ -94,7 +77,6 @@ class CameraUpdate(BaseModel):
     detection: CameraDetection | None = Field(
         default=None, description="The camera's own detection settings; null follows the general"
     )
-    worker_id: WorkerPin = None
 
 
 class CameraRuntime(BaseModel):
@@ -135,10 +117,6 @@ class CameraRead(BaseModel):
     zone: LoadingZone | None
     plate_url: str | None
     detection: CameraDetection | None
-    worker_id: int | None = Field(description="The worker it is pinned to; null: automatic")
-    node: CameraNode | None = Field(
-        description="Where it runs now; null: nowhere (disabled, or waiting for a node)"
-    )
     created_at: datetime
     updated_at: datetime
     runtime: CameraRuntime

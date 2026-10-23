@@ -77,7 +77,7 @@ def test_object_staying_on_one_side_is_not_counted() -> None:
     assert (analyzer.line_in, analyzer.line_out) == (0, 0)
 
 
-def test_object_entered_is_emitted_once_per_track() -> None:
+def test_a_new_track_is_reported_entered_once() -> None:
     analyzer = FrameAnalyzer(fps=5, line=None, min_hits=2)
     history = _run(analyzer, [200.0] * 8, class_name="truck")
     assert sum(entered for entered, _, _ in history) == 1

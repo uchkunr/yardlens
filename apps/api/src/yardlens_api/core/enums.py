@@ -5,7 +5,6 @@ class SourceType(StrEnum):
     RTSP = "rtsp"
     HTTP = "http"
     HLS = "hls"
-    YOUTUBE = "youtube"
     FILE = "file"
 
 
@@ -18,7 +17,6 @@ class CameraStatus(StrEnum):
 
 
 class EventType(StrEnum):
-    OBJECT_ENTERED = "object_entered"
     LINE_CROSSED_IN = "line_crossed_in"
     LINE_CROSSED_OUT = "line_crossed_out"
     CAMERA_ONLINE = "camera_online"

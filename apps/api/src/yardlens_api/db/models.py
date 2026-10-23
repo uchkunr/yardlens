@@ -19,7 +19,9 @@ from sqlalchemy.types import TypeDecorator
 
 # The canonical PostgreSQL schema is schema.sql next to this file (applied by db-setup). These
 # mappings match it; ``metadata.create_all`` is only used for SQLite (tests and quick local runs).
-JsonType = JSON().with_variant(JSONB(), "postgresql")
+# A Python None is stored as SQL NULL (not the JSON value null), so `zone IS NOT NULL` means
+# "the camera has a zone".
+JsonType = JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), "postgresql")
 
 
 def utcnow() -> datetime:
@@ -67,10 +69,6 @@ class Camera(Base):
     zone: Mapped[dict[str, Any] | None] = mapped_column(default=None)
     plate_url: Mapped[str | None] = mapped_column(String(2048), default=None)
     detection: Mapped[dict[str, Any] | None] = mapped_column(default=None)
-    # Pinned to this worker; None places the camera automatically.
-    worker_id: Mapped[int | None] = mapped_column(
-        ForeignKey("workers.id", ondelete="SET NULL"), default=None
-    )
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
 
@@ -177,33 +175,3 @@ class RefreshToken(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(default=None)
     user_agent: Mapped[str | None] = mapped_column(String(256), default=None)
     ip: Mapped[str | None] = mapped_column(String(64), default=None)
-
-
-class Worker(Base):
-    """An analysis node on another machine."""
-
-    __tablename__ = "workers"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String(64), unique=True)
-    token_hash: Mapped[str] = mapped_column(String(64))
-    created_at: Mapped[datetime] = mapped_column(default=utcnow)
-    last_seen_at: Mapped[datetime | None] = mapped_column(default=None)
-    address: Mapped[str | None] = mapped_column(String(64), default=None)
-    version: Mapped[str | None] = mapped_column(String(32), default=None)
-    info: Mapped[dict[str, Any] | None] = mapped_column(default=None)
-
-
-class CameraAssignment(Base):
-    """The node a camera runs on: a worker, or this server (``worker_id`` None)."""
-
-    __tablename__ = "camera_assignments"
-
-    camera_id: Mapped[int] = mapped_column(
-        ForeignKey("cameras.id", ondelete="CASCADE"), primary_key=True
-    )
-    worker_id: Mapped[int | None] = mapped_column(
-        ForeignKey("workers.id", ondelete="CASCADE"), default=None
-    )
-    epoch: Mapped[int] = mapped_column(BigInteger)
-    assigned_at: Mapped[datetime] = mapped_column(default=utcnow)
